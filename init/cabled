@@ -5,13 +5,10 @@ description="Starts cables communication daemon."
 cuser=cable
 cableflag=/var/www/cable
 
-daemon=/usr/local/libexec/cable/cabled
+daemon=/usr/libexec/cable/cabled
 pidfile=/var/run/cabled.pid
 
 depend() {
-    # need identity setup
-    need identity
-
     # initialization in cabled is done before nginx is up
     before nginx
 }
