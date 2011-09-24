@@ -29,7 +29,6 @@ clean:
 
 bin/% cable/%: obj/%.o
 	$(CC) -o $@ $(CFLAGS) $< $(LDFLAGS) $(ldextra_$*) 
-	strip -s $@
 
 obj/%.o: src/%.c
 	$(CC) -c -o $@ $(CFLAGS) $<
