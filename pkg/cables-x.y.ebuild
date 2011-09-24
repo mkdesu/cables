@@ -53,11 +53,13 @@ src_compile() {
 }
 
 src_install() {
-	doinitd  init/cabled
+	doinitd  init/cabled              || die
+	doconfd  conf/spawn-fcgi.cable    || die
+	dosym    spawn-fcgi /etc/init.d/spawn-fcgi.cable || die
 
-	insinto  /usr/share/${PN}
-	doins    conf/nginx.conf conf/spawn-fcgi.cable || die
-	fperms   600 ${INSDESTTREE}/nginx.conf         || die
+	insinto  /etc/nginx
+	doins    conf/nginx-cable.conf    || die
+	fperms   600 ${INSDESTTREE}/nginx.conf || die
 
 	dobin    bin/*                    || die
 
@@ -76,14 +78,16 @@ src_install() {
 
 pkg_postinst() {
 	elog "Remember to add cabled and nginx to the default runlevel"
-	elog "    rc-update add cabled default"
-	elog "    rc-update add nginx  default"
+	elog "    rc-update add cabled           default"
+	elog "    rc-update add nginx            default"
+	elog "    rc-update add spawn-fcgi.cable default"
 	elog ""
 	elog "You need to adjust the user-specific paths in:"
 	elog "    /usr/libexec/cable/suprofile (CABLE_MOUNT must be mountpoint or /)"
 	elog "    /etc/conf.d/spawn-fcgi.cable (CABLE_QUEUES should mirror suprofile)"
-	elog "    /etc/nginx/nginx.conf        (root should mirror CABLE_PUB in suprofile)"
-	elog "    (take spawn-fcgi.cable and nginx.conf from /usr/share/${PN})"
+	elog "    /etc/nginx/nginx-cable.conf  (root should mirror CABLE_PUB in suprofile)"
+	elog "then set the nginx configuration"
+	elog "    ln -snf nginx-cable.conf /etc/nginx/nginx.conf"
 	elog "Note that CABLE_INBOX and CABLE_QUEUES/{queue,rqueue} directories"
 	elog "must be writable by 'cable' (create them if they don't exist)."
 	elog ""
