@@ -14,7 +14,7 @@ distinguished_name  = req_empty
 subjectKeyIdentifier   = hash
 authorityKeyIdentifier = keyid:always,issuer:always
 
-authorityInfoAccess = caIssuers;URI:http://dee.su/liberte
+authorityInfoAccess = caIssuers;URI:http://dee.su/cables
 
 basicConstraints    = critical, CA:true, pathlen:0
 keyUsage            = critical, keyCertSign, cRLSign

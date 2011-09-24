@@ -7,7 +7,7 @@ See the relevant [peer review](http://dee.su/liberte-peer-review) section for fu
 
 ## Requirements
 
-[Nginx](http://nginx.org/), [spawn-fcgi](http://redmine.lighttpd.net/projects/spawn-fcgi) and [fcgiwrap](http://nginx.localdomain.pl/wiki/FcgiWrap) need to be installed in order for the [CGI service](https://github.com/mkdesu/cables/blob/master/src/service.c) to work. [Tor](https://www.torproject.org/) and [I2P](http://www.i2p2.de/) are needed to utilize the respective communication transports.
+[Nginx](http://nginx.org/), [spawn-fcgi](http://redmine.lighttpd.net/projects/spawn-fcgi) and [fcgiwrap](http://nginx.localdomain.pl/wiki/FcgiWrap) need to be installed in order for the [CGI service](https://github.com/mkdesu/cables/blob/master/src/service.c) to work. [Procmail](http://www.procmail.org/) is utilized for message formatting and headers manipulation. [Tor](https://www.torproject.org/) and [I2P](http://www.i2p2.de/) are needed to utilize the respective communication transports. The Gentoo [ebuild script](https://github.com/mkdesu/cables/blob/master/pkg/cables-x.y.ebuild) explicitly lists all package dependencies.
 
 ## Building
 

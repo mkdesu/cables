@@ -19,7 +19,7 @@ keysdirtmp=${keysdir}.tmp
 # reqsubj not affected by LC_ALL
 rsabits=8192
 shabits=512
-reqsubj='/O=Liberté Linux/CN=Anonymous'
+reqsubj='/O=LIBERTE CABLE/CN=Anonymous'
 crtdays=18300
 
 
