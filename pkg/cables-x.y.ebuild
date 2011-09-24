@@ -59,7 +59,7 @@ src_install() {
 
 	insinto  /etc/nginx
 	doins    conf/nginx-cable.conf    || die
-	fperms   600 ${INSDESTTREE}/nginx.conf || die
+	fperms   600 ${INSDESTTREE}/nginx-cable.conf || die
 
 	dobin    bin/*                    || die
 
@@ -71,7 +71,7 @@ src_install() {
 
 	keepdir       /var/www/cable/certs /var/www/cable/queue /var/www/cable/rqueue
 	fperms  3310  /var/www/cable/certs /var/www/cable/queue /var/www/cable/rqueue || die
-	fperms   711  /var/www/cable                                                  || die
+	fperms   711  /var/www             /var/www/cable                             || die
 	fowners      :nginx /var/www/cable/certs                                      || die "failed to change ownership"
 	fowners cable:nginx /var/www/cable/queue /var/www/cable/rqueue                || die "failed to change ownership"
 }
@@ -86,7 +86,7 @@ pkg_postinst() {
 	elog "    /usr/libexec/cable/suprofile (CABLE_MOUNT must be mountpoint or /)"
 	elog "    /etc/conf.d/spawn-fcgi.cable (CABLE_QUEUES should mirror suprofile)"
 	elog "    /etc/nginx/nginx-cable.conf  (root should mirror CABLE_PUB in suprofile)"
-	elog "then set the nginx configuration"
+	elog "and then set the nginx configuration"
 	elog "    ln -snf nginx-cable.conf /etc/nginx/nginx.conf"
 	elog "Note that CABLE_INBOX and CABLE_QUEUES/{queue,rqueue} directories"
 	elog "must be writable by 'cable' (create them if they don't exist)."
@@ -102,7 +102,7 @@ pkg_postinst() {
 	elog "Once a cables username has been generated for the user:"
 	elog "    rename CABLE_PUB/cable to CABLE_PUB/<username>"
 	elog "        <username> is located in CABLE_CERTS/certs/username"
-	elog "    /etc/nginx/nginx.conf"
+	elog "    /etc/nginx/nginx-cable.conf"
 	elog "        replace each occurrence of CABLE with <username>"
 	elog "        uncomment the 'allow' line"
 	elog ""
