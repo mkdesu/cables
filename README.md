@@ -11,7 +11,7 @@ See the relevant [peer review](http://dee.su/liberte-peer-review) section for fu
 
 ## Building
 
-I2P's _i2p.jar_ library is needed to compile [EepPriv.java](https://github.com/mkdesu/cables/blob/master/src/EepPriv.java) — adjust the makefile accordingly. Building _eeppriv.jar_ is not necessary if you don't need the eepSite [keypair generation](https://github.com/mkdesu/cables/blob/master/cable/gen-i2p-hostname) functionality.
+I2P's _i2p.jar_ library is needed to compile [EepPriv.java](https://github.com/mkdesu/cables/blob/master/src/su/dee/i2p/EepPriv.java) — adjust the makefile accordingly, and put _i2p.jar_ into _lib_ if the jar is unavailable during build. Building _eeppriv.jar_ is not necessary if you don't need the eepSite [keypair generation](https://github.com/mkdesu/cables/blob/master/cable/gen-i2p-hostname) functionality.
 
 ## Installation
 
@@ -19,9 +19,9 @@ The init services configuration works as-is in Gentoo, but is easy to adapt for 
 
 The [mail sender](https://github.com/mkdesu/cables/blob/master/cable/send), [cables daemon](https://github.com/mkdesu/cables/blob/master/src/daemon.c) and the [CGI service](https://github.com/mkdesu/cables/blob/master/src/service.c) are supposed to be executed under _cable:cable_ user (which needs to be created). The [init service](https://github.com/mkdesu/cables/blob/master/init/cabled) for the cables daemon, [nginx](https://github.com/mkdesu/cables/blob/master/conf/nginx.conf) and [spawn-fcgi](https://github.com/mkdesu/cables/blob/master/conf/spawn-fcgi.cable) configuration should be adapted for the distribution and installed in the appropriate places. Cables and nginx init services should be then added to the relevant runlevels.
 
-Cable pathnames should be adjusted in [suprofile](https://github.com/mkdesu/cables/blob/master/cable/suprofile) (note that _CABLE_MOUNT_ should be a mountpoint — use **/** for root filesystem), in [spawn-fcgi configuration](https://github.com/mkdesu/cables/blob/master/conf/spawn-fcgi.cable) _(CABLE_QUEUES)_ and in [nginx configuration](https://github.com/mkdesu/cables/blob/master/conf/nginx.conf) _(CABLE_PUB's literal value)_. Each occurrence of _CABLE_ in [nginx configuration](https://github.com/mkdesu/cables/blob/master/conf/nginx.conf) should be replaced with the cables username (from _CABLE_CERTS/certs/username_, see certificates propagation below), otherwise nginx will deny all queries.
+Cable pathnames should be adjusted in [suprofile](https://github.com/mkdesu/cables/blob/master/cable/suprofile) (note that _CABLE_MOUNT_ should be a mountpoint — use **/** for root filesystem), in [spawn-fcgi configuration](https://github.com/mkdesu/cables/blob/master/conf/spawn-fcgi.cable) _(CABLE_QUEUES)_ and in [nginx configuration](https://github.com/mkdesu/cables/blob/master/conf/nginx.conf) _(CABLE_PUB's literal value)_. Each occurrence of _CABLE_ in [nginx configuration](https://github.com/mkdesu/cables/blob/master/conf/nginx.conf) should be replaced with the cables username (from _CABLE_CERTS/certs/username_, see certificates propagation below), and the _allow_ line should be uncommented, otherwise nginx will deny all queries.
 
-The _CABLE_PUB/username/{certs,queue,rqueue}_ directories should be writable by _cable_ and readable by _nginx_ (e.g., _cable:nginx_, mode 03310). The _CABLE_INBOX_ and _CABLE_QUEUES/{queue,rqueue}_ directories should be writable by _cable_ (e.g., mode 01770 with _cable_ in user's group).
+The _CABLE_PUB/username/{certs,(r)queue}_ directories should be writable by _cable_ and readable by _nginx_ (e.g., _cable:nginx_, mode 03310). The _CABLE_INBOX_ and _CABLE_QUEUES/(r)queue_ directories should be writable by _cable_ (e.g., mode 01770 with _cable_ in user's group).
 
 ## User configuration
 
