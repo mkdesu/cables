@@ -1,0 +1,3 @@
+*.o
+*.class
+manifest.mf

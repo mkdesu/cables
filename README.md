@@ -11,7 +11,7 @@ See the relevant [peer review](http://dee.su/liberte-peer-review) section for fu
 
 ## Building
 
-I2P's _i2p.jar_ library is needed to compile [EepPriv.java](https://github.com/mkdesu/cables/blob/master/src/EepPriv.java). Building _eeppriv.jar_ is not necessary if you don't need the eepSite [keypair generation](https://github.com/mkdesu/cables/blob/master/cable/gen-i2p-hostname) functionality.
+I2P's _i2p.jar_ library is needed to compile [EepPriv.java](https://github.com/mkdesu/cables/blob/master/src/EepPriv.java) — adjust the makefile accordingly. Building _eeppriv.jar_ is not necessary if you don't need the eepSite [keypair generation](https://github.com/mkdesu/cables/blob/master/cable/gen-i2p-hostname) functionality.
 
 ## Installation
 
