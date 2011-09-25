@@ -403,7 +403,7 @@ static int wait_read(double sec) {
 static void rand_init() {
     struct timespec tp;
 
-    if (clock_gettime(CLOCK_MONOTONIC_RAW, &tp) == -1)
+    if (clock_gettime(CLOCK_MONOTONIC, &tp) == -1)
         error();
 
     srandom(((unsigned) tp.tv_sec << 29) ^ (unsigned) tp.tv_nsec);
@@ -420,7 +420,7 @@ static double rand_shift() {
 static double getmontime() {
     struct timespec tp;
 
-    if (clock_gettime(CLOCK_MONOTONIC_RAW, &tp) == -1)
+    if (clock_gettime(CLOCK_MONOTONIC, &tp) == -1)
         error();
 
     return tp.tv_sec + tp.tv_nsec / 1e9;
