@@ -89,7 +89,6 @@ for addr in ${addresses}; do
        ${tmpdir}/${msgid}/
 
     # atomically move directory to queue dir, and create send.req indicator
-    # (works even if the move is not atomic)
+    touch ${tmpdir}/${msgid}/send.req
     mv -T ${tmpdir}/${msgid} ${queuedir}/${msgid}
-    touch ${queuedir}/${msgid}/send.req
 done
