@@ -1,6 +1,6 @@
 #!/bin/sh -e
 
-cableid=/usr/libexec/cable/cable-id
+cableid=cable-id
 title="Cables Communication Identity"
 
 if username=`${cableid} user 2>/dev/null`; then

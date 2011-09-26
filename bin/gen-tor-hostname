@@ -1,7 +1,8 @@
 #!/bin/sh -e
 
 # This command can be run via "sudo -u anon"
-. "${0%"${0##*/}"}"suprofile
+CABLE_HOME=/usr/libexec/cable/
+. ${CABLE_HOME}suprofile
 
 
 # https://gitweb.torproject.org/tor.git/blob/HEAD:/doc/spec/tor-spec.txt

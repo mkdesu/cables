@@ -7,6 +7,12 @@ ldextra_daemon  = -lrt
 title  := $(shell grep -o 'LIBERTE CABLE [[:alnum:]._-]\+' src/service.c)
 
 
+# Installation directories (override DESTDIR and/or PREFIX)
+DESTDIR=/
+PREFIX=/usr
+instdir=$(subst //,/,$(DESTDIR)$(PREFIX))
+
+
 # Default compilers
 CC      = gcc
 JAVAC   = javac
@@ -18,14 +24,14 @@ JLIBS  := $(subst : ,:,$(patsubst %,%:,$(wildcard lib/*.jar)))
 
 
 # Build rules
-.PHONY:     all clean
+.PHONY:     all clean install
 .SUFFIXES:  .o
 .SECONDARY:
 
 all: $(progs)
 
 clean:
-	$(RM) -r $(progs) obj/*
+	$(RM) -r $(progs) $(wildcard obj/*)
 
 bin/% cable/%: obj/%.o
 	$(CC) -o $@ $(CFLAGS) $< $(LDFLAGS) $(ldextra_$*) 
@@ -42,3 +48,14 @@ cable/eeppriv.jar: obj/su/dee/i2p/EepPriv.class
 
 obj/%.class: src/%.java
 	$(JAVAC) -d obj $(JFLAGS) $< -classpath obj:$(JLIBS)$(cpextra_$(basename $(*F)))
+
+install: all
+	install -d $(instdir)/bin $(instdir)/libexec/cable $(instdir)/share/applications $(instdir)/share/cable
+	install -m 644 -t $(instdir)/share/applications $(wildcard share/*.desktop)
+	install -m 644 -t $(instdir)/share/cable $(wildcard init/*) $(wildcard conf/*)
+	install -t $(instdir)/bin           $(wildcard bin/*)
+	install -t $(instdir)/libexec/cable $(wildcard cable/*)
+	-chmod a-x $(patsubst %,$(instdir)/libexec/cable/%,suprofile extensions.cnf eeppriv.jar)
+	sed -i     's&/usr/libexec/cable/&$(PREFIX)/libexec/cable/&g' \
+	           $(patsubst %,$(instdir)/share/cable/%,cabled nginx-cable.conf) \
+	           $(patsubst %,$(instdir)/bin/%,cable-id cable-ping gen-cable-username gen-tor-hostname gen-i2p-hostname)

@@ -1,11 +1,12 @@
 #!/bin/sh -e
 
 # This command can be run via "sudo -u anon"
-. "${0%"${0##*/}"}"suprofile
+CABLE_HOME=/usr/libexec/cable/
+. ${CABLE_HOME}suprofile
 
 
 i2pdir=${CABLE_I2P}/eepsite
-eeppriv=${CABLE_HOME}/eeppriv.jar
+eeppriv="${CABLE_HOME}"eeppriv.jar
 
 i2pdirtmp=${i2pdir}.tmp
 

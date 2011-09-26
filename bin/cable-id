@@ -1,7 +1,8 @@
 #!/bin/sh -e
 
 # Setup environment with needed environment vars
-. "${0%"${0##*/}"}"suprofile
+CABLE_HOME=/usr/libexec/cable/
+. ${CABLE_HOME}suprofile
 
 
 error() {
