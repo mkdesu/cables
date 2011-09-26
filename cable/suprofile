@@ -8,9 +8,7 @@ export LC_ALL=C
 
 
 # Rely on pam_mktemp
-if [ -z "${TMPDIR}" ]; then
-    export TMPDIR=/tmp/.private/${USER}
-fi
+export TMPDIR=${TMPDIR:-/tmp/.private/${USER}}
 
 
 # Neutral settings
@@ -24,7 +22,7 @@ export https_proxy=${http_proxy}
 
 # Cable directories and settings
 # NOTE: CABLE_HOME ends with / (if non-empty)
-export CABLE_HOME="${0%"${0##*/}"}"
+export CABLE_HOME=${CABLE_HOME:-"${0%"${0##*/}"}"}
 export CABLE_MOUNT=/home/anon/persist
 export CABLE_CERTS=${CABLE_MOUNT}/security/ssl
 export CABLE_TOR=${CABLE_MOUNT}/security/tor
