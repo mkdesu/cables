@@ -8,6 +8,7 @@ title  := $(shell grep -o 'LIBERTE CABLE [[:alnum:]._-]\+' src/service.c)
 
 
 # Installation directories (override DESTDIR and/or PREFIX)
+# (DESTDIR is temporary, PREFIX is hard-coded into scripts)
 DESTDIR=/
 PREFIX=/usr
 instdir=$(subst //,/,$(DESTDIR)$(PREFIX))
@@ -31,7 +32,7 @@ JLIBS  := $(subst : ,:,$(patsubst %,%:,$(wildcard lib/*.jar)))
 all: $(progs)
 
 clean:
-	$(RM) -r $(progs) $(wildcard obj/*)
+	$(RM) -r $(progs) obj/*
 
 bin/% cable/%: obj/%.o
 	$(CC) -o $@ $(CFLAGS) $< $(LDFLAGS) $(ldextra_$*) 
@@ -53,8 +54,8 @@ install: all
 	install -d $(instdir)/bin $(instdir)/libexec/cable $(instdir)/share/applications $(instdir)/share/cable
 	install -m 644 -t $(instdir)/share/applications $(wildcard share/*.desktop)
 	install -m 644 -t $(instdir)/share/cable $(wildcard init/*) $(wildcard conf/*)
-	install -t $(instdir)/bin           $(wildcard bin/*)
-	install -t $(instdir)/libexec/cable $(wildcard cable/*)
+	install -t $(instdir)/bin           bin/*
+	install -t $(instdir)/libexec/cable cable/*
 	-chmod a-x $(patsubst %,$(instdir)/libexec/cable/%,suprofile extensions.cnf eeppriv.jar)
 	sed -i     's&/usr/libexec/cable/&$(PREFIX)/libexec/cable/&g' \
 	           $(patsubst %,$(instdir)/share/cable/%,cabled nginx-cable.conf) \
