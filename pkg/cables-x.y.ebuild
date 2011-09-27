@@ -64,6 +64,8 @@ src_install() {
 	doins    "${D}"/usr/share/cable/nginx-cable.conf || die
 	fperms   600 ${INSDESTTREE}/nginx-cable.conf     || die
 
+	rm -r    "${D}"/usr/share/cable
+
 	# /var/www(/cable)        drwx--x--x root  root
 	# /var/www/cable/certs    d-wx--s--T root  nginx
 	# /var/www/cable/(r)queue d-wx--s--T cable nginx
