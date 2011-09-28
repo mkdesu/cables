@@ -53,9 +53,10 @@ obj/%.class: src/%.java
 install: all
 	install -d $(instdir)/bin $(instdir)/libexec/cable $(instdir)/share/applications $(instdir)/share/cable
 	install -m 644 -t $(instdir)/share/applications $(wildcard share/*.desktop)
-	install -m 644 -t $(instdir)/share/cable $(wildcard init/*) $(wildcard conf/*)
-	install -t $(instdir)/bin           bin/*
-	install -t $(instdir)/libexec/cable cable/*
+	install        -t $(instdir)/share/cable   $(wildcard init/*)
+	install -m 644 -t $(instdir)/share/cable   $(wildcard conf/*)
+	install        -t $(instdir)/bin           bin/*
+	install        -t $(instdir)/libexec/cable cable/*
 	-chmod a-x $(patsubst %,$(instdir)/libexec/cable/%,suprofile extensions.cnf eeppriv.jar)
 	sed -i     's&/usr/libexec/cable/&$(PREFIX)/libexec/cable/&g' \
 	           $(patsubst %,$(instdir)/share/cable/%,cabled nginx-cable.conf) \
