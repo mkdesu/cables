@@ -7,8 +7,12 @@ umask 077
 export LC_ALL=C
 
 
-# Rely on pam_mktemp
+# Support pam_mktemp
 export TMPDIR=${TMPDIR:-/tmp/.private/${USER}}
+if [ ! -e ${TMPDIR} ]; then
+    TMPDIR=/tmp/.${USER}
+    mkdir -pm 700 ${TMPDIR}
+fi
 
 
 # Neutral settings
