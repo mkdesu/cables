@@ -115,9 +115,8 @@ pkg_postinst() {
 	elog "        tunnel.X.targetHost=127.0.0.1"
 	elog "        tunnel.X.targetPort=80"
 	elog ""
-	elog "Finally, the user should configure the email client to run"
-	elog "    sudo -nu cable /usr/libexec/cable/send"
+	elog "Finally, the user should configure the email client to run cable-send"
 	elog "as a pipe for sending messages from addresses shown by"
 	elog "    cable-info (or see CABLE_CERTS/certs/username, CABLE_{TOR,I2P}/*/hostname)"
-	elog "Edit /etc/sudoers to avoid the password prompt on sudo."
+	elog "See comments in /usr/bin/cable-send for /etc/sudoers entry suggestion."
 }
