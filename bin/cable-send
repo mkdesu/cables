@@ -1,0 +1,7 @@
+#!/bin/sh -e
+
+# /etc/sudoers should contain something like
+# anon	ALL = (cable) NOPASSWD: /usr/libexec/cable/send ""
+
+CABLE_HOME=/usr/libexec/cable/
+exec sudo -n -u cable ${CABLE_HOME}send "$@"

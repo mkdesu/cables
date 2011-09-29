@@ -60,4 +60,4 @@ install: all
 	-chmod a-x $(patsubst %,$(instdir)/libexec/cable/%,suprofile extensions.cnf eeppriv.jar)
 	sed -i     's&/usr/libexec/cable/&$(PREFIX)/libexec/cable/&g' \
 	           $(patsubst %,$(instdir)/share/cable/%,cabled nginx-cable.conf) \
-	           $(patsubst %,$(instdir)/bin/%,cable-id cable-ping gen-cable-username gen-tor-hostname gen-i2p-hostname)
+	           $(patsubst %,$(instdir)/bin/%,cable-id cable-ping cable-send gen-cable-username gen-tor-hostname gen-i2p-hostname)
