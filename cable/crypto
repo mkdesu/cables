@@ -110,8 +110,8 @@ ack)
             getuserhost ${queue}
             date=`date -uR`
 
-            (formail -f -i "Date: ${date}" < ${queue}/"${msgid}"/message.hdr;   \
-                echo "Verified message delivery to\n  ${username}@${hostname}") \
+            (formail -f -i "Date: ${date}" < ${queue}/"${msgid}"/message.hdr; \
+                echo "Verified message delivery to ${username}@${hostname}")  \
                 > ${queue}/"${msgid}"/message.ack
 
             deliver ${inbox} ${queue}/"${msgid}"/message.ack

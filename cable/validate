@@ -75,14 +75,14 @@ if [ ${qtype} = queue ]; then
         | sed "${subjrep}" > "${msgdir}"/message.rej
 
     if [ -e "${msgdir}"/send.req  -o  -e "${msgdir}"/send.rdy ]; then
-        echo "Failed to fetch certificates and encrypt message for\n  ${username}@${hostname}" \
+        echo "Failed to fetch certificates and encrypt message for ${username}@${hostname}" \
             >> "${msgdir}"/message.rej
     elif [ -e "${msgdir}"/send.ok ]; then
         if [ ! -e "${msgdir}"/ack.ok ]; then
-            echo "Failed to send message and receive receipt from\n  ${username}@${hostname}"  \
+            echo "Failed to send message and receive receipt from ${username}@${hostname}"  \
                 >> "${msgdir}"/message.rej
         else
-            echo "Failed to acknowledge receipt received from\n  ${username}@${hostname}"      \
+            echo "Failed to acknowledge receipt received from ${username}@${hostname}"      \
                 >> "${msgdir}"/message.rej
         fi
     else
@@ -98,12 +98,12 @@ else
         (formail -f -I "From: <${username}@${hostname}>"         \
                     -I "Old-Date: ${msgdate}" -I "Date: ${date}" \
                     -I "Subject: [fail]" <&-;                    \
-            echo "Failed to fetch and decrypt message from\n  ${username}@${hostname}") \
+            echo "Failed to fetch and decrypt message from ${username}@${hostname}") \
             > "${msgdir}"/message.rej
     elif [ -e "${msgdir}"/recv.ok ]; then
         # message.hdr is available
         (formail -f -i "Date: ${date}" < "${msgdir}"/message.hdr; \
-            echo "Failed to send receipt and receive acknowledgment from\n  ${username}@${hostname}") \
+            echo "Failed to send receipt and receive acknowledgment from ${username}@${hostname}") \
             > "${msgdir}"/message.rej
     else
         error "inconsistent state"
