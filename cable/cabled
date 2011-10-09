@@ -12,9 +12,8 @@ msgidre='[0-9a-f]{40}'
 
 # Initialization tasks
 if [ "$1" = init ]; then
-    find ${rqueue} -maxdepth 1 -type d -regextype posix-egrep \
-                   -regex "${rqueue}/${msgidre}\.new" -print0 \
-        | xargs -0 rm -rf --one-file-system --
+    find ${rqueue} -mindepth 1 -regextype posix-egrep \
+                   -regex "${rqueue}/${msgidre}\.new(/.*)?" -delete
     exit
 fi
 
