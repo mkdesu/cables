@@ -14,9 +14,9 @@
 #include <sys/stat.h>
 
 
-#define VERSION             "LIBERTE CABLE 1.0"
+#define VERSION             "LIBERTE CABLE 2.0"
 #define REQVAR              "PATH_INFO"
-#define MAX_REQ_LENGTH      256
+#define MAX_REQ_LENGTH      512
 
 /* caller shouldn't be able to differentiate OK/ERROR */
 #define OK                  "OK"
@@ -31,7 +31,7 @@
 #define TOR_HOSTNAME_LENGTH  16
 #define I2P_HOSTNAME_LENGTH  52
 #define USERNAME_LENGTH      32
-#define ACKHASH_LENGTH      128
+#define MAC_LENGTH          128
 
 /* maximum filename length in (r)q_pfx/<msgid>/: 32 characters */
 #define MAX_PATH_PREFIX     127
@@ -149,8 +149,8 @@ static void check_file(const char *path) {
 }
 
 
-static void handle_msg(const char *msgid, const char *hostname, const char *username,
-                       const char *cqueues) {
+static void handle_msg(const char *msgid, const char *mac, const char *hostname,
+                       const char *username, const char *cqueues) {
     char path[MAX_PATH_LENGTH+1], npath[MAX_PATH_LENGTH+4+1];
     int  baselen;
 
@@ -180,6 +180,10 @@ static void handle_msg(const char *msgid, const char *hostname, const char *user
     strcpy(npath + baselen, "/username");
     write_line(npath, username);
 
+    /* write send.mac */
+    strcpy(npath + baselen, "/send.mac");
+    write_line(npath, mac);
+
     /* create recv.req */
     strcpy(npath + baselen, "/recv.req");
     create_file(npath);
@@ -191,8 +195,9 @@ static void handle_msg(const char *msgid, const char *hostname, const char *user
 }
 
 
-static void handle_rcp(const char *msgid, const char *cqueues) {
+static void handle_rcp(const char *msgid, const char *mac, const char *cqueues) {
     char path[MAX_PATH_LENGTH+1], npath[MAX_PATH_LENGTH+1];
+    char exmac[MAC_LENGTH+2];
     int  baselen;
 
     /* base: .../cables/queue/<msgid> */
@@ -205,8 +210,17 @@ static void handle_rcp(const char *msgid, const char *cqueues) {
     strcpy(path + baselen, "/send.ok");
     check_file(path);
 
+    /* read recv.mac */
+    strcpy(path + baselen, "/recv.mac");
+    read_line(path, exmac, sizeof(exmac));
+
+    /* compare <recvmac> <-> recv.mac */
+    if (strcmp(mac, exmac))
+        retstatus(ERROR);
+
     /* create ack.req (atomic) */
     strcpy(npath, path);
+    strcpy(path  + baselen, "/send.ok");
     strcpy(npath + baselen, "/ack.req");
     if (! link(path, npath)) {
         /* touch /cables/queue/<msgid>/ (if ack.req didn't exist) */
@@ -220,9 +234,9 @@ static void handle_rcp(const char *msgid, const char *cqueues) {
 }
 
 
-static void handle_ack(const char *msgid, const char *ackhash, const char *cqueues) {
+static void handle_ack(const char *msgid, const char *mac, const char *cqueues) {
     char path[MAX_PATH_LENGTH+1], trpath[MAX_PATH_LENGTH+4+1];
-    char recack[ACKHASH_LENGTH+2];
+    char exmac[MAC_LENGTH+2];
     int  baselen;
 
     /* base: .../cables/rqueue/<msgid> */
@@ -235,12 +249,12 @@ static void handle_ack(const char *msgid, const char *ackhash, const char *cqueu
     strcpy(path + baselen, "/recv.ok");
     check_file(path);
 
-    /* read receipt.ack */
-    strcpy(path + baselen, "/receipt.ack");
-    read_line(path, recack, sizeof(recack));
+    /* read ack.mac */
+    strcpy(path + baselen, "/ack.mac");
+    read_line(path, exmac, sizeof(exmac));
 
-    /* compare <ackhash> <-> receipt.ack */
-    if (strcmp(ackhash, recack))
+    /* compare <ackmac> <-> ack.mac */
+    if (strcmp(mac, exmac))
         retstatus(ERROR);
 
     /* rename .../cables/rqueue/<msgid> -> <msgid>.del */
@@ -256,7 +270,7 @@ static void handle_ack(const char *msgid, const char *ackhash, const char *cqueu
 int main() {
     char       buf[MAX_REQ_LENGTH+1], cqueues[MAX_PATH_PREFIX+1];
     const char *pathinfo, *delim = "/", *cqenv;
-    char       *cmd, *msgid, *arg1, *arg2;
+    char       *cmd, *msgid, *mac, *arg1, *arg2;
 
     umask(0077);
     setlocale(LC_ALL, "C");
@@ -281,6 +295,7 @@ int main() {
     /* Tokenize the request */
     cmd   = strtok(buf,  delim);
     msgid = strtok(NULL, delim);
+    mac   = strtok(NULL, delim);
     arg1  = strtok(NULL, delim);
     arg2  = strtok(NULL, delim);
 
@@ -300,12 +315,12 @@ int main() {
     /* Handle commands
 
        ver
-       msg/<msgid>/<hostname>/<username>
-       rcp/<msgid>
-       ack/<msgid>/<ackhash>
+       msg/<msgid>/<mac>/<hostname>/<username>
+       rcp/<msgid>/<mac>
+       ack/<msgid>/<mac>
 
        msgid:    MSGID_LENGTH        lowercase xdigits
-       ackhash:  ACKHASH_LENGTH      lowercase xdigits
+       mac:      MAC_LENGTH          lowercase xdigits
        hostname: TOR_HOSTNAME_LENGTH lowercase base-32 chars + ".onion"
                  I2P_HOSTNAME_LENGTH lowercase base-32 chars + ".b32.i2p"
        username: USERNAME_LENGTH     lowercase base-32 chars
@@ -321,30 +336,32 @@ int main() {
             retstatus(BADFMT);
 
         if (   !vfyhex(MSGID_LENGTH, msgid)
+            || !vfyhex(MAC_LENGTH, mac)
             || !vfyhost(arg1)
             || !vfybase32(USERNAME_LENGTH, arg2))
             retstatus(BADFMT);
 
-        handle_msg(msgid, arg1, arg2, cqueues);
+        handle_msg(msgid, mac, arg1, arg2, cqueues);
     }
     else if (!strcmp("rcp", cmd)) {
-        if (!msgid || arg1)
-            retstatus(BADFMT);
-
-        if (!vfyhex(MSGID_LENGTH, msgid))
-            retstatus(BADFMT);
-
-        handle_rcp(msgid, cqueues);
-    }
-    else if (!strcmp("ack", cmd)) {
-        if (!arg1 || arg2)
+        if (!mac || arg1)
             retstatus(BADFMT);
 
         if (   !vfyhex(MSGID_LENGTH, msgid)
-            || !vfyhex(ACKHASH_LENGTH, arg1))
+            || !vfyhex(MAC_LENGTH, mac))
             retstatus(BADFMT);
 
-        handle_ack(msgid, arg1, cqueues);
+        handle_rcp(msgid, mac, cqueues);
+    }
+    else if (!strcmp("ack", cmd)) {
+        if (!mac || arg1)
+            retstatus(BADFMT);
+
+        if (   !vfyhex(MSGID_LENGTH, msgid)
+            || !vfyhex(MAC_LENGTH, mac))
+            retstatus(BADFMT);
+
+        handle_ack(msgid, mac, cqueues);
     }
     else
         retstatus(BADFMT);

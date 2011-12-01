@@ -21,6 +21,7 @@ msgid="$2"
 trap '[ $? = 0 ] || error failed' 0
 error() {
     logger -t comm -p mail.err "$@ (${msgid})"
+    trap - 0
     exit 1
 }
 
@@ -51,6 +52,17 @@ atomicnccopy() {
 }
 
 
+# MAC key extractor
+getmac() {
+    local src="$1" mac=
+
+    mac=`cat "${src}" | tr -cd '[:xdigit:]' | tr A-F a-f`
+    [ ${#mac} = 128 ] || error "malformed or non-existing MAC in `basename "${src}"`"
+
+    echo "${mac}"
+}
+
+
 # Sanity checks
 [ ${#msgid}    = 40 ] || error "bad msgid"
 [ ${#username} = 32 ] || error "bad own username"
@@ -73,9 +85,12 @@ send)
         shostname=`cat ${queue}/"${msgid}"/shostname | tr -cd '[:alnum:].-' | tr '[:upper:]' '[:lower:]'`
         check_userhost "${username}" "${shostname}"
 
-        atomicnccopy ${queue}/"${msgid}"/message.out "${pubqueue}"/"${msgid}"
+        atomicnccopy ${queue}/"${msgid}"/peereph.sig "${pubqueue}"/"${msgid}".key
+        atomicnccopy ${queue}/"${msgid}"/message.enc "${pubqueue}"/"${msgid}"
+
+        sendmac=`getmac ${queue}/"${msgid}"/send.mac`
         curl -sSfg -o ${queue}/"${msgid}"/${cmd}.ans \
-                   "${prefix}"/msg/"${msgid}"/"${shostname}"/"${username}"
+                   "${prefix}"/msg/"${msgid}"/"${sendmac}"/"${shostname}"/"${username}"
     else
         error "${cmd}.ok (without ack.ok) not found"
     fi
@@ -86,8 +101,8 @@ recv)
     if [ -e ${rqueue}/"${msgid}"/${cmd}.ok ]; then
         prefix=`urlprefix ${rqueue}`
 
-        atomicnccopy ${rqueue}/"${msgid}"/receipt.out "${pubrqueue}"/"${msgid}"
-        curl -sSfg -o ${rqueue}/"${msgid}"/${cmd}.ans "${prefix}"/rcp/"${msgid}"
+        recvmac=`getmac ${queue}/"${msgid}"/recv.mac`
+        curl -sSfg -o ${rqueue}/"${msgid}"/${cmd}.ans "${prefix}"/rcp/"${msgid}"/"${recvmac}"
     else
         error "${cmd}.ok not found"
     fi
@@ -98,12 +113,10 @@ ack)
     if [ -e ${queue}/"${msgid}"/${cmd}.ok ]; then
         prefix=`urlprefix ${queue}`
 
-        rm -f "${pubqueue}"/"${msgid}"
+        rm -f "${pubqueue}"/"${msgid}" "${pubqueue}"/"${msgid}".key
 
-        ackhash=`cat ${queue}/"${msgid}"/receipt.ack | tr -cd '[:xdigit:]' | tr A-F a-f`
-        [ ${#ackhash} = 128 ] || error "bad ackhash in receipt.ack"
-
-        curl -sSfg -o ${queue}/"${msgid}"/${cmd}.ans "${prefix}"/ack/"${msgid}"/"${ackhash}"
+        ackmac=`getmac ${queue}/"${msgid}"/ack.mac`
+        curl -sSfg -o ${queue}/"${msgid}"/${cmd}.ans "${prefix}"/ack/"${msgid}"/"${ackmac}"
 
         mv -T ${queue}/"${msgid}" ${queue}/"${msgid}".del
 
@@ -111,7 +124,7 @@ ack)
         # rm -f "${pubqueue}"/"${msgid}"
         # rm -r --one-file-system ${queue}/"${msgid}".del
     elif [ -e ${queue}/"${msgid}".del ]; then
-        rm -f "${pubqueue}"/"${msgid}"
+        rm -f "${pubqueue}"/"${msgid}" "${pubqueue}"/"${msgid}".key
         rm -r --one-file-system ${queue}/"${msgid}".del
     else
         error "${cmd}.ok or .del directory not found"
@@ -121,7 +134,6 @@ ack)
 fin)
     # <fin> [comm loop]
     if [ -e ${rqueue}/"${msgid}".del ]; then
-        rm -f "${pubrqueue}"/"${msgid}"
         rm -r --one-file-system ${rqueue}/"${msgid}".del
     else
         error ".del directory not found"

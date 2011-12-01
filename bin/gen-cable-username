@@ -11,6 +11,7 @@ CABLE_HOME=/usr/libexec/cable/
 base32=hex2base32
 
 sslconf="${CABLE_HOME}"extensions.cnf
+modp18="${CABLE_HOME}"rfc3526-modp-18.pem
 certdir=${CABLE_CERTS}/certs
 keysdir=${CABLE_CERTS}/private
 
@@ -49,10 +50,8 @@ fingerprint=`openssl x509 -in ${certdirtmp}/ca.pem -outform der | sha1sum | head
 ${base32} ${fingerprint} > ${certdirtmp}/username
 
 
-# In absence of lifetime/backup policy and in presence of padding,
-# it's fine to use the same key for encryption and authentication
+# Use the same key for DH peer key authentication
 ln -s root.pem ${keysdirtmp}/sign.pem
-ln -s root.pem ${keysdirtmp}/decrypt.pem
 
 
 # Generate X.509 verification certificate
@@ -64,13 +63,18 @@ openssl x509 -req -days ${crtdays} -sha${shabits} -out ${certdirtmp}/verify.pem 
              -extfile "${sslconf}" -extensions verify 2>/dev/null
 
 
-# Generate X.509 encryption certificate
-openssl req -batch -new -utf8 -subj "${reqsubj}" \
-            -key ${keysdirtmp}/decrypt.pem |     \
-openssl x509 -req -days ${crtdays} -sha${shabits} -out ${certdirtmp}/encrypt.pem \
-             -CA ${certdirtmp}/ca.pem -CAkey ${keysdirtmp}/root.pem              \
-             -CAserial ${certdirtmp}/certs.srl                                   \
-             -extfile "${sslconf}" -extensions encrypt 2>/dev/null
+# Generate static DH peer key, and sign it
+openssl genpkey -paramfile "${modp18}" \
+             -out ${keysdirtmp}/derive.pem
+openssl pkey -pubout -in ${keysdirtmp}/derive.pem \
+             -outform der -out ${certdirtmp}/peer.der
+
+openssl cms -sign -noattr -binary -md sha${shabits} -nodetach -nocerts -outform pem \
+            -signer   ${certdirtmp}/verify.pem  \
+            -inkey    ${keysdirtmp}/sign.pem    \
+            -in       ${certdirtmp}/peer.der    \
+            -out      ${certdirtmp}/peer.sig
+rm ${certdirtmp}/peer.der
 
 
 # Sanity checks
@@ -79,18 +83,22 @@ openssl verify -x509_strict -check_ss_sig -policy_check -purpose crlsign      \
               -CAfile ${certdirtmp}/ca.pem -CApath /dev/null ${certdirtmp}/ca.pem
 openssl verify -x509_strict -check_ss_sig -policy_check -purpose smimesign    \
               -CAfile ${certdirtmp}/ca.pem -CApath /dev/null ${certdirtmp}/verify.pem
-openssl verify -x509_strict -check_ss_sig -policy_check -purpose smimeencrypt \
-              -CAfile ${certdirtmp}/ca.pem -CApath /dev/null ${certdirtmp}/encrypt.pem
 `
 
 test "${checks}" = "${certdirtmp}/ca.pem: OK
-${certdirtmp}/verify.pem: OK
-${certdirtmp}/encrypt.pem: OK"
+${certdirtmp}/verify.pem: OK"
+
+
+openssl cms -verify \
+            -x509_strict -policy_check -purpose smimesign -check_ss_sig -inform pem \
+            -CAfile   ${certdirtmp}/ca.pem -CApath /dev/null \
+            -certfile ${certdirtmp}/verify.pem               \
+            -in       ${certdirtmp}/peer.sig  -out /dev/null
 
 
 # Commit new directories
 chmod 710 ${certdirtmp}   ${keysdirtmp}
-chmod 640 ${certdirtmp}/* ${keysdirtmp}/root.pem
+chmod 640 ${certdirtmp}/* ${keysdirtmp}/*
 
 mv -T ${certdirtmp} ${certdir}
 mv -T ${keysdirtmp} ${keysdir}

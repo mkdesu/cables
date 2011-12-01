@@ -26,6 +26,7 @@ tsfile="${msgdir}"/username
 trap '[ $? = 0 ] || error failed' 0
 error() {
     logger -t validate -p mail.err "$@ (${msgid})"
+    trap - 0
     exit 1
 }
 

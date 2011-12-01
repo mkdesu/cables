@@ -25,6 +25,7 @@ msgid="$2"
 trap '[ $? = 0 ] || error failed' 0
 error() {
     logger -t crypto -p mail.err "$@ (${msgid})"
+    trap - 0
     exit 1
 }
 
@@ -61,7 +62,8 @@ send)
     if [ -e ${queue}/"${msgid}"/${cmd}.rdy ]; then
         if "${cms}" ${cmd} ${ssldir} ${queue}/"${msgid}" 2>/dev/null; then
             mv ${queue}/"${msgid}"/${cmd}.rdy ${queue}/"${msgid}"/${cmd}.ok
-            rm ${queue}/"${msgid}"/message
+            rm ${queue}/"${msgid}"/message    ${queue}/"${msgid}"/ca.pem \
+               ${queue}/"${msgid}"/verify.pem ${queue}/"${msgid}"/peer.sig
         else
             mv ${queue}/"${msgid}"/${cmd}.rdy ${queue}/"${msgid}"/${cmd}.req
             error "${cmd} failed"
@@ -78,6 +80,9 @@ recv)
             getuserhost ${rqueue}
             date=`date -uR`
 
+            if ! /bin/gzip -cdt ${rqueue}/"${msgid}"/message 2>/dev/null; then
+                error "${cmd}: non-gzipped message"
+            fi
             /bin/gzip -cd ${rqueue}/"${msgid}"/message            \
                 | formail -z -I 'From '                           \
                              -i "From: <${username}@${hostname}>" \
@@ -92,8 +97,10 @@ recv)
 
             deliver ${inbox} ${rqueue}/"${msgid}"/message.ibx
 
-            mv ${rqueue}/"${msgid}"/${cmd}.rdy ${rqueue}/"${msgid}"/${cmd}.ok
-            rm ${rqueue}/"${msgid}"/message    ${rqueue}/"${msgid}"/message.out
+            mv ${rqueue}/"${msgid}"/${cmd}.rdy  ${rqueue}/"${msgid}"/${cmd}.ok
+            rm ${rqueue}/"${msgid}"/message     ${rqueue}/"${msgid}"/message.enc \
+               ${rqueue}/"${msgid}"/ca.pem      ${rqueue}/"${msgid}"/verify.pem  \
+               ${rqueue}/"${msgid}"/peereph.sig ${rqueue}/"${msgid}"/send.mac
         else
             mv ${rqueue}/"${msgid}"/${cmd}.rdy ${rqueue}/"${msgid}"/${cmd}.req
             error "${cmd} failed"
@@ -105,26 +112,21 @@ recv)
 
 ack)
     # <ack> [crypto loop]
-    if [ -e ${queue}/"${msgid}"/${cmd}.rdy ]; then
-        if "${cms}" ${cmd} ${ssldir} ${queue}/"${msgid}" 2>/dev/null; then
-            getuserhost ${queue}
-            date=`date -uR`
+    if [ -e ${queue}/"${msgid}"/${cmd}.req  -a  ! -e ${queue}/"${msgid}"/${cmd}.ok ]; then
+        getuserhost ${queue}
+        date=`date -uR`
 
-            (formail -f -i "Date: ${date}" < ${queue}/"${msgid}"/message.hdr; \
-                echo "Verified message delivery to ${username}@${hostname}")  \
-                > ${queue}/"${msgid}"/message.ack
+        (formail -f -i "Date: ${date}" < ${queue}/"${msgid}"/message.hdr; \
+            echo "Verified message delivery to ${username}@${hostname}")  \
+            > ${queue}/"${msgid}"/message.ack
 
-            deliver ${inbox} ${queue}/"${msgid}"/message.ack
+        deliver ${inbox} ${queue}/"${msgid}"/message.ack
 
-            mv ${queue}/"${msgid}"/${cmd}.rdy  ${queue}/"${msgid}"/${cmd}.ok
-            rm ${queue}/"${msgid}"/message.out ${queue}/"${msgid}"/receipt.out \
-               ${queue}/"${msgid}"/message.sig
-        else
-            mv ${queue}/"${msgid}"/${cmd}.rdy ${queue}/"${msgid}"/${cmd}.req
-            error "${cmd} failed"
-        fi
+        mv ${queue}/"${msgid}"/${cmd}.req  ${queue}/"${msgid}"/${cmd}.ok
+        rm ${queue}/"${msgid}"/message.enc ${queue}/"${msgid}"/peereph.sig \
+           ${queue}/"${msgid}"/send.mac    ${queue}/"${msgid}"/recv.mac
     else
-        error "${cmd}.rdy not found"
+        error "${cmd}.req (without ${cmd}.ok) not found"
     fi
     ;;
 

@@ -1,7 +1,7 @@
 #!/bin/sh -e
 
 if [ $# != 2 ]; then
-    echo "Format: $0 send|recv|ack <msgid>"
+    echo "Format: $0 send|recv <msgid>"
     exit 1
 fi
 
@@ -18,6 +18,7 @@ msgid="$2"
 trap '[ $? = 0 ] || error failed' 0
 error() {
     logger -t fetch -p mail.err "$@ (${msgid})"
+    trap - 0
     exit 1
 }
 
@@ -47,9 +48,9 @@ send)
         prefix=`urlprefix ${queue}`
 
         # A multi-URI curl command doesn't fail on a bad early fetch
-        curl -sSfg -o ${queue}/"${msgid}"/ca.pem      "${prefix}"/certs/ca.pem
-        curl -sSfg -o ${queue}/"${msgid}"/verify.pem  "${prefix}"/certs/verify.pem
-        curl -sSfg -o ${queue}/"${msgid}"/encrypt.pem "${prefix}"/certs/encrypt.pem
+        curl -sSfg -o ${queue}/"${msgid}"/ca.pem     "${prefix}"/certs/ca.pem
+        curl -sSfg -o ${queue}/"${msgid}"/verify.pem "${prefix}"/certs/verify.pem
+        curl -sSfg -o ${queue}/"${msgid}"/peer.sig   "${prefix}"/certs/peer.sig
 
         mv ${queue}/"${msgid}"/${cmd}.req ${queue}/"${msgid}"/${cmd}.rdy
     else
@@ -63,29 +64,14 @@ recv)
         prefix=`urlprefix ${rqueue}`
 
         # A multi-URI curl command deosn't fail on a bad early fetch
-        curl -sSfg -o ${rqueue}/"${msgid}"/message.out "${prefix}"/queue/"${msgid}"
+        curl -sSfg -o ${rqueue}/"${msgid}"/message.enc "${prefix}"/queue/"${msgid}"
+        curl -sSfg -o ${rqueue}/"${msgid}"/peereph.sig "${prefix}"/queue/"${msgid}".key
         curl -sSfg -o ${rqueue}/"${msgid}"/ca.pem      "${prefix}"/certs/ca.pem
         curl -sSfg -o ${rqueue}/"${msgid}"/verify.pem  "${prefix}"/certs/verify.pem
-        curl -sSfg -o ${rqueue}/"${msgid}"/encrypt.pem "${prefix}"/certs/encrypt.pem
 
         mv ${rqueue}/"${msgid}"/${cmd}.req ${rqueue}/"${msgid}"/${cmd}.rdy
     else
         error "${cmd}.req not found"
-    fi
-    ;;
-
-ack)
-    # <ack> [fetch loop]
-    if [ -e ${queue}/"${msgid}"/${cmd}.req       \
-         -a  ! -e ${queue}/"${msgid}"/${cmd}.rdy \
-         -a  ! -e ${queue}/"${msgid}"/${cmd}.ok  ]; then
-        prefix=`urlprefix ${queue}`
-
-        curl -sSfg -o ${queue}/"${msgid}"/receipt.out "${prefix}"/rqueue/"${msgid}"
-
-        mv ${queue}/"${msgid}"/${cmd}.req ${queue}/"${msgid}"/${cmd}.rdy
-    else
-        error "${cmd}.req (without ${cmd}.rdy/${cmd}.ok) not found"
     fi
     ;;
 

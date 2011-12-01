@@ -33,6 +33,7 @@ msgdir=${CABLE_QUEUES}/${qtype}/"${dirid}"
 trap '[ $? = 0 ] || error failed' 0
 error() {
     logger -t loop -p mail.err "$@ (${msgid})"
+    trap - 0
     exit 1
 }
 
@@ -72,13 +73,9 @@ else
         "${validate}" ${qtype} "${msgid}"
         set +e
 
-        if   [ -e "${msgdir}"/ack.rdy ]; then
-            "${crypto}" ack  "${msgid}" && \
-            "${comm}"   ack  "${msgid}"
-        elif [ -e "${msgdir}"/ack.ok  ]; then
+        if   [ -e "${msgdir}"/ack.ok  ]; then
             "${comm}"   ack  "${msgid}"
         elif [ -e "${msgdir}"/ack.req ]; then
-            "${fetch}"  ack  "${msgid}" && \
             "${crypto}" ack  "${msgid}" && \
             "${comm}"   ack  "${msgid}"
         fi

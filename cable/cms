@@ -1,23 +1,29 @@
 #!/bin/sh -e
 
-# Encryption, decryption and verification of messages and message receipts
+# Encryption, decryption and verification of messages
 # NOTE: the "-e" switch above is important (script failure on error)!
+
+# WARNING: keys are provided as parameters to OpenSSL.
+# This script should be rewritten as a C program.
 
 # Variables
 cmd="$1"
 ssldir="$2"
 msgdir="$3"
 
+modp18="${CABLE_HOME}"rfc3526-modp-18.pem
+
 sigalg=sha512
 encalg=aes256
+enchash=sha256
 
 base32=hex2base32
 
 
 # Command-line parameters
-if [ \( "${cmd}" != send -a "${cmd}" != recv -a "${cmd}" != ack \) \
+if [ \( "${cmd}" != send -a "${cmd}" != recv \) \
      -o  ! -d "${ssldir}"  -o  ! -d "${msgdir}" ]; then
-    echo "Format: $0 send|recv|ack <ssldir> <msgdir>"
+    echo "Format: $0 send|recv <ssldir> <msgdir>"
     exit 1
 fi
 
@@ -25,18 +31,19 @@ fi
 trap '[ $? = 0 ] || error failed' 0
 error() {
     logger -t cms -p mail.err "$@ (${msgdir##*/})"
+    trap - 0
     exit 1
 }
 
 
 # Verifying the ca/verify/encrypt certificates triple
 # * parses and extracts the first certificate from each file
-# * verifies the certificates chain (important only for encrypt.pem)
+# * verifies the certificates chain
 # * generates username from ca.pem and checks it against the given one
 verify_certs() {
     local cvedir="$1" name count fingerprint username
 
-    for name in ca verify encrypt; do
+    for name in ca verify; do
         openssl x509 -in  "${cvedir}"/${name}.pem \
                      -out "${cvedir}"/${name}.norm.pem
         mv -- "${cvedir}"/${name}.norm.pem "${cvedir}"/${name}.pem
@@ -46,20 +53,18 @@ verify_certs() {
         [ "${count}" = 1 ]
     done
 
+    # certificates chain verification is also implicitly done later,
+    # so not strictly necessary
     openssl verify -x509_strict -policy_check -purpose crlsign -check_ss_sig \
         -CApath /dev/null -CAfile "${cvedir}"/ca.pem "${cvedir}"/ca.pem \
         >  "${cvedir}"/certs.vfy 2>&1
     openssl verify -x509_strict -policy_check -purpose smimesign \
         -CApath /dev/null -CAfile "${cvedir}"/ca.pem "${cvedir}"/verify.pem \
         >> "${cvedir}"/certs.vfy 2>&1
-    openssl verify -x509_strict -policy_check -purpose smimeencrypt \
-        -CApath /dev/null -CAfile "${cvedir}"/ca.pem "${cvedir}"/encrypt.pem \
-        >> "${cvedir}"/certs.vfy 2>&1
 
     if ! cmp -s -- "${cvedir}"/certs.vfy - <<EOF
 ${cvedir}/ca.pem: OK
 ${cvedir}/verify.pem: OK
-${cvedir}/encrypt.pem: OK
 EOF
     then
         error "certificates chain verification failed"
@@ -82,121 +87,162 @@ EOF
 }
 
 
-# Public certificates and private keys in PEM format
+# Public certificates and private keys
 # ${certdir}/ca.pem      : X.509 self-signed root CA certificate
 # ${certdir}/verify.pem  : X.509 signature verification certificate (issued by root CA)
-# ${certdir}/encrypt.pem : X.509 encryption certificate             (issued by root CA)
 # ${keysdir}/sign.pem    : private signature key
-# ${keysdir}/decrypt.pem : private decryption key (may be the same as signature key)
+# ${keysdir}/derive.pem  : private static DH key
 certdir="${ssldir}"/certs
 keysdir="${ssldir}"/private
 
 
 # Input and output files are in ${msgdir}
 #
-# (all)
-#     in:  ca.pem, verify.pem, encrypt.pem
-#
 # <send>
-#     in:  message, username
-#     out: message.sig, message.out
+#     in:  message, username, ca.pem, verify.pem, peer.sig
+#     out: peereph.sig, message.enc, {send,recv,ack}.mac
 #
-# ---> message.out
+# ---> peereph.sig, message.enc, send.mac
 #
 # <recv>
-#     in:  message.out, username
-#     out: message, receipt.{ack,out}
+#     in:  message.enc, username, send.mac, ca.pem, verify.pem, peereph.sig
+#     out: message, {recv,ack}.mac
 #
-# <--- receipt.out
+# <--- recv.mac
 #
-# <ack> (expects <send>'s directory)
-#     in:  receipt.out, message.sig
-#     out: receipt.ack
-
+# <ack>
+#
+# ---> ack.mac
 case ${cmd} in
 send)
-    rm -f -- "${msgdir}"/message.sig "${msgdir}"/message.out \
-             "${msgdir}"/receipt.sig "${msgdir}"/receipt.ack "${msgdir}"/receipt.out
+    rm -f -- "${msgdir}"/deriveeph.pem "${msgdir}"/peereph.der "${msgdir}"/peer.der    \
+             "${msgdir}"/peereph.sig   "${msgdir}"/shared.key  "${msgdir}"/message.enc \
+             "${msgdir}"/send.mac      "${msgdir}"/recv.mac    "${msgdir}"/ack.mac
 
+    # verify certificates chain
     verify_certs "${msgdir}"
 
-    # NOTE: -noattr is partially ignored
-    openssl cms -sign -noattr -binary -md ${sigalg} -nodetach \
-                -receipt_request_all -receipt_request_to auto \
-                -outform der -nocerts                 \
-                -signer   "${certdir}"/verify.pem     \
-                -inkey    "${keysdir}"/sign.pem       \
-                -in       "${msgdir}"/message         \
-                -out      "${msgdir}"/message.sig
+    # verify and extract signed recipient's static public peer key
+    openssl cms -verify \
+                -x509_strict -policy_check -purpose smimesign -check_ss_sig -inform pem \
+                -CAfile   "${msgdir}"/ca.pem -CApath /dev/null \
+                -certfile "${msgdir}"/verify.pem               \
+                -in       "${msgdir}"/peer.sig                 \
+                -out      "${msgdir}"/peer.der
 
-    openssl cms -encrypt -binary -${encalg} -outform pem \
-                -in       "${msgdir}"/message.sig \
-                -out      "${msgdir}"/message.out \
-                          "${msgdir}"/encrypt.pem
+    # generate ephemeral peer key
+    openssl genpkey -paramfile "${modp18}" \
+                    -out "${msgdir}"/deriveeph.pem
+
+    # derive (large) shared secret
+    openssl pkeyutl -derive -peerform der              \
+                    -inkey   "${msgdir}"/deriveeph.pem \
+                    -peerkey "${msgdir}"/peer.der      \
+                    -out     "${msgdir}"/shared.key
+
+    # extract and sign ephemeral public peer key
+    openssl pkey -pubout -outform der           \
+                 -in  "${msgdir}"/deriveeph.pem \
+                 -out "${msgdir}"/peereph.der
+
+    openssl cms -sign -noattr -binary -md ${sigalg} -nodetach -nocerts -outform pem \
+                -signer   "${certdir}"/verify.pem  \
+                -inkey    "${keysdir}"/sign.pem    \
+                -in       "${msgdir}"/peereph.der  \
+                -out      "${msgdir}"/peereph.sig
+
+    # deterministically derive encryption and MAC keys from shared secret
+    enckey=`openssl dgst -mac hmac -${enchash} -macopt key:encrypt "${msgdir}"/shared.key | cut -d' ' -f2`
+    sendkey=`openssl dgst -mac hmac -${sigalg} -macopt key:send    "${msgdir}"/shared.key | cut -d' ' -f2`
+    recvkey=`openssl dgst -mac hmac -${sigalg} -macopt key:recv    "${msgdir}"/shared.key | cut -d' ' -f2`
+    [ ${#enckey} = 64  -a  ${#sendkey} = 128  -a  ${#recvkey} = 128 ]
+
+    # compute message send/recv/ack MACs using derived MAC keys
+    openssl dgst -mac hmac -${sigalg}      \
+                 -macopt hexkey:${sendkey} \
+                 -out "${msgdir}"/send.mac \
+                      "${msgdir}"/message
+
+    openssl dgst -mac hmac -${sigalg}      \
+                 -macopt hexkey:${recvkey} \
+                 -out "${msgdir}"/recv.mac \
+                      "${msgdir}"/message
+
+    openssl dgst -mac hmac -${sigalg} -macopt key:ack \
+                 -out "${msgdir}"/ack.mac             \
+                      "${msgdir}"/shared.key
+
+    sed -i 's/^.* //' -- "${msgdir}"/send.mac "${msgdir}"/recv.mac "${msgdir}"/ack.mac
+
+    # encrypt message using encryption key
+    openssl cms -EncryptedData_encrypt -binary -${encalg} -outform pem \
+                -secretkey ${enckey}               \
+                -in        "${msgdir}"/message     \
+                -out       "${msgdir}"/message.enc
+
+    rm -- "${msgdir}"/deriveeph.pem "${msgdir}"/peereph.der "${msgdir}"/peer.der \
+          "${msgdir}"/shared.key
+
     ;;
 
 
 recv)
-    rm -f -- "${msgdir}"/message.sig "${msgdir}"/message    \
-             "${msgdir}"/receipt.sig "${msgdir}"/receipt.ack "${msgdir}"/receipt.out
+    rm -f -- "${msgdir}"/peereph.der "${msgdir}"/shared.key "${msgdir}"/message  \
+             "${msgdir}"/send.cmp    "${msgdir}"/recv.mac   "${msgdir}"/ack.mac
 
+    # verify certificates chain
     verify_certs "${msgdir}"
 
-    openssl cms -decrypt -inform pem \
-                -recip    "${certdir}"/encrypt.pem \
-                -inkey    "${keysdir}"/decrypt.pem \
-                -in       "${msgdir}"/message.out  \
-                -out      "${msgdir}"/message.sig
-
-    openssl cms -verify -inform der \
-                -x509_strict -policy_check -purpose smimesign -check_ss_sig \
+    # verify and extract signed sender's ephemeral public peer key
+    openssl cms -verify \
+                -x509_strict -policy_check -purpose smimesign -check_ss_sig -inform pem \
                 -CAfile   "${msgdir}"/ca.pem -CApath /dev/null \
-                -certfile "${msgdir}"/verify.pem  \
-                -in       "${msgdir}"/message.sig \
-                -out      "${msgdir}"/message
+                -certfile "${msgdir}"/verify.pem               \
+                -in       "${msgdir}"/peereph.sig              \
+                -out      "${msgdir}"/peereph.der
 
-    # NOTE: -md (and partially, -noattr) are ignored
-    openssl cms -sign_receipt -noattr -md ${sigalg} -nodetach \
-                -inform der -outform der -nocerts \
-                -signer   "${certdir}"/verify.pem \
-                -inkey    "${keysdir}"/sign.pem   \
-                -in       "${msgdir}"/message.sig \
-                -out      "${msgdir}"/receipt.sig
+    # derive (large) shared secret
+    openssl pkeyutl -derive -peerform der            \
+                    -inkey   "${keysdir}"/derive.pem \
+                    -peerkey "${msgdir}"/peereph.der \
+                    -out     "${msgdir}"/shared.key
 
-    openssl cms -encrypt -binary -${encalg} -outform pem \
-                -in       "${msgdir}"/receipt.sig \
-                -out      "${msgdir}"/receipt.out \
-                          "${msgdir}"/encrypt.pem
+    # deterministically derive encryption and MAC keys from shared secret
+    enckey=`openssl dgst -mac hmac -${enchash} -macopt key:encrypt "${msgdir}"/shared.key | cut -d' ' -f2`
+    sendkey=`openssl dgst -mac hmac -${sigalg} -macopt key:send    "${msgdir}"/shared.key | cut -d' ' -f2`
+    recvkey=`openssl dgst -mac hmac -${sigalg} -macopt key:recv    "${msgdir}"/shared.key | cut -d' ' -f2`
+    [ ${#enckey} = 64  -a  ${#sendkey} = 128  -a  ${#recvkey} = 128 ]
 
-    ${sigalg}sum -- "${msgdir}"/receipt.sig | sed 's/[[:blank:]].*//' \
-                 >  "${msgdir}"/receipt.ack
-    [ -s "${msgdir}"/receipt.ack ]
+    # decrypt message using encryption key
+    openssl cms -EncryptedData_decrypt -inform pem  \
+                -secretkey ${enckey}                \
+                -in        "${msgdir}"/message.enc  \
+                -out       "${msgdir}"/message
 
-    rm -- "${msgdir}"/message.sig "${msgdir}"/receipt.sig
-    ;;
+    # compute message send/recv/ack MACs using derived MAC keys
+    openssl dgst -mac hmac -${sigalg}      \
+                 -macopt hexkey:${sendkey} \
+                 -out "${msgdir}"/send.cmp \
+                      "${msgdir}"/message
 
+    openssl dgst -mac hmac -${sigalg}      \
+                 -macopt hexkey:${recvkey} \
+                 -out "${msgdir}"/recv.mac \
+                      "${msgdir}"/message
 
-ack)
-    rm -f -- "${msgdir}"/receipt.sig "${msgdir}"/receipt.ack
+    openssl dgst -mac hmac -${sigalg} -macopt key:ack \
+                 -out "${msgdir}"/ack.mac             \
+                      "${msgdir}"/shared.key
 
-    openssl cms -decrypt -inform pem \
-                -recip    "${certdir}"/encrypt.pem \
-                -inkey    "${keysdir}"/decrypt.pem \
-                -in       "${msgdir}"/receipt.out  \
-                -out      "${msgdir}"/receipt.sig
+    sed -i 's/^.* //' -- "${msgdir}"/send.cmp "${msgdir}"/recv.mac "${msgdir}"/ack.mac
 
-    openssl cms -x509_strict -policy_check -purpose smimesign -check_ss_sig \
-                -inform der -rctform der \
-                -CAfile         "${msgdir}"/ca.pem -CApath /dev/null \
-                -certfile       "${msgdir}"/verify.pem  \
-                -verify_receipt "${msgdir}"/receipt.sig \
-                -in             "${msgdir}"/message.sig
+    # verify message MAC
+    if ! cmp -s -- "${msgdir}"/send.mac "${msgdir}"/send.cmp; then
+        error "MAC verification failed"
+    fi
 
-    ${sigalg}sum -- "${msgdir}"/receipt.sig | sed 's/[[:blank:]].*//' \
-                 >  "${msgdir}"/receipt.ack
-    [ -s "${msgdir}"/receipt.ack ]
+    rm -- "${msgdir}"/peereph.der "${msgdir}"/shared.key "${msgdir}"/send.cmp
 
-    rm -- "${msgdir}"/receipt.sig
     ;;
 
 

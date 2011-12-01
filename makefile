@@ -57,7 +57,7 @@ install: all
 	install -m 644 -t $(instdir)/share/cable   $(wildcard conf/*)
 	install        -t $(instdir)/bin           bin/*
 	install        -t $(instdir)/libexec/cable cable/*
-	-chmod a-x $(patsubst %,$(instdir)/libexec/cable/%,suprofile extensions.cnf eeppriv.jar)
+	-chmod a-x $(patsubst %,$(instdir)/libexec/cable/%,suprofile extensions.cnf eeppriv.jar rfc3526-modp-18.pem)
 	sed -i     's&/usr/libexec/cable/&$(PREFIX)/libexec/cable/&g' \
 	           $(patsubst %,$(instdir)/share/cable/%,cabled nginx-cable.conf) \
 	           $(patsubst %,$(instdir)/bin/%,cable-id cable-ping cable-send gen-cable-username gen-tor-hostname gen-i2p-hostname)
