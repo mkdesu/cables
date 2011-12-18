@@ -15,6 +15,9 @@ modp18="${CABLE_HOME}"rfc3526-modp-18.pem
 certdir=${CABLE_CERTS}/certs
 keysdir=${CABLE_CERTS}/private
 
+v1certdir=${CABLE_CERTS}/../ssl/certs
+v1keysdir=${CABLE_CERTS}/../ssl/private
+
 certdirtmp=${certdir}.tmp
 keysdirtmp=${keysdir}.tmp
 
@@ -36,6 +39,9 @@ fi
 rm -rf ${certdirtmp} ${keysdirtmp} ${certdir} ${keysdir}
 mkdir  ${certdirtmp} ${keysdirtmp}
 
+
+# Migrate v1 directories, if present
+if [ ! -e ${v1certdir}/username ]; then
 
 # Generate RSA key + X.509 self-signed root CA certificate
 openssl req -batch -new -utf8 -subj "${reqsubj}" \
@@ -61,6 +67,15 @@ openssl x509 -req -days ${crtdays} -sha${shabits} -out ${certdirtmp}/verify.pem 
              -CA ${certdirtmp}/ca.pem -CAkey ${keysdirtmp}/root.pem             \
              -CAcreateserial -CAserial ${certdirtmp}/certs.srl                  \
              -extfile "${sslconf}" -extensions verify 2>/dev/null
+
+else
+    echo "Migrating v1.0 certificates"
+
+    rsync -aHAX ${v1certdir}/ ${certdirtmp}
+    rsync -aHAX ${v1keysdir}/ ${keysdirtmp}
+
+    rm ${certdirtmp}/encrypt.pem ${keysdirtmp}/decrypt.pem
+fi
 
 
 # Generate static DH peer key, and sign it
@@ -100,5 +115,5 @@ openssl cms -verify \
 chmod 710 ${certdirtmp}   ${keysdirtmp}
 chmod 640 ${certdirtmp}/* ${keysdirtmp}/*
 
-mv -T ${certdirtmp} ${certdir}
 mv -T ${keysdirtmp} ${keysdir}
+mv -T ${certdirtmp} ${certdir}
