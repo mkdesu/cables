@@ -1,0 +1,71 @@
+#!/bin/bash -e
+
+sinfo() {
+    echo -e "\033[1;33;41m$@\033[0m"
+}
+
+scriptdir="${0%"${0##*/}"}"
+cd ${scriptdir:-./}..
+
+
+root=`mktemp -d`
+sinfo "Root dir: ${root}"
+
+
+sinfo "Building"
+CFLAGS="-O2 -march=core2 -mfpmath=sse -fomit-frame-pointer -pipe" \
+LDFLAGS="-Wl,-O1,--as-needed,-z,combreloc" make -s
+
+
+sinfo "Installing stage1"
+make -s PREFIX=${root}/stage1 install
+
+
+sinfo "Setting stage1 paths for user1"
+cat >> ${root}/stage1/libexec/cable/suprofile <<EOF
+
+export CABLE_MOUNT=/
+export CABLE_CERTS=${root}/user1/cable
+export CABLE_TOR=${root}/user1/tor
+export CABLE_I2P=${root}/user1/i2p
+export CABLE_QUEUES=${root}/user1/queues
+export CABLE_INBOX=${root}/user1/inbox
+export CABLE_PUB=${root}/user1/www
+EOF
+
+
+sinfo "Installing stage2"
+make -s PREFIX=${root}/stage2 install
+
+
+sinfo "Setting stage2 paths for user2"
+cat >> ${root}/stage2/libexec/cable/suprofile <<EOF
+
+export CABLE_MOUNT=/
+export CABLE_CERTS=${root}/user2/cable
+export CABLE_TOR=${root}/user2/tor
+export CABLE_I2P=${root}/user2/i2p
+export CABLE_QUEUES=${root}/user2/queues
+export CABLE_INBOX=${root}/user2/inbox
+export CABLE_PUB=${root}/user2/www
+EOF
+
+
+sinfo "Reducing RSA strength"
+sed -i 's/^rsabits=.*/rsabits=1024/' ${root}/stage{1,2}/bin/gen-cable-username
+
+
+sinfo "Creating user paths"
+mkdir -p ${root}/user{1,2}/{cable,tor,i2p,queues/{,r}queue,inbox,www/cable/{certs,{,r}queue}}
+
+
+sinfo "Generating cables, Tor and I2P certificates"
+${root}/stage1/bin/gen-cable-username
+${root}/stage2/bin/gen-cable-username
+${root}/stage1/bin/gen-tor-hostname
+${root}/stage2/bin/gen-tor-hostname
+${root}/stage1/bin/gen-i2p-hostname
+${root}/stage2/bin/gen-i2p-hostname
+
+
+sinfo "Success"
