@@ -3,7 +3,7 @@
 description="Starts cables communication daemon."
 
 cuser=cable
-cableflag=/var/www/cable
+cableflag=/srv/www/cable
 
 daemon=/usr/libexec/cable/cabled
 pidfile=/var/run/cabled.pid
