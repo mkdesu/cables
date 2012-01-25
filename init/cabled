@@ -26,7 +26,7 @@ start() {
 
         # SSD -u sets up USER and HOME, and sanitizes environment
         ebegin "Starting cabled"
-        start-stop-daemon -S -q -c ${cuser} -p ${pidfile} -bm -x ${daemon} --
+        start-stop-daemon -S -q -u ${cuser} -p ${pidfile} -bm -x ${daemon} --
         eend $?
     else
         ewarn "Skipping cabled startup"
