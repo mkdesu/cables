@@ -6,7 +6,7 @@ CABLE_HOME=/usr/libexec/cable/
 
 
 # NOTE: PSS signatures support in certificates
-# is not yet released for OpenSSL
+# (but not in CMS) is available in OpenSSL 1.0.1
 
 base32=hex2base32
 
@@ -71,8 +71,9 @@ openssl x509 -req -days ${crtdays} -sha${shabits} -out ${certdirtmp}/verify.pem 
 else
     echo "Migrating v1.0 certificates"
 
-    rsync -aHAX ${v1certdir}/ ${certdirtmp}
-    rsync -aHAX ${v1keysdir}/ ${keysdirtmp}
+    # NTFS-3G denies 'getfattr -h' on symlinks for non-root user
+    rsync -aHA ${v1certdir}/ ${certdirtmp}
+    rsync -aHA ${v1keysdir}/ ${keysdirtmp}
 
     rm ${certdirtmp}/encrypt.pem ${keysdirtmp}/decrypt.pem
 fi
