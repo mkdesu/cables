@@ -34,7 +34,7 @@ url=http://"${host}"/"${user}"/request/ver
 
 
 # Pipe eats curl's error status, if any
-resp=`curl -sSfg "${url}" 2>&1 | head -c ${maxresp} | tr -cd '[:alnum:][:blank:]:()._-'`
+resp=`curl -sSfg "${url}" 2>&1 | head -c ${maxresp} | tr -cd '[:alnum:][:blank:]:()/._-'`
 
 if echo x "${resp}" | grep -q "^x curl:"; then
     error "communication error: ${resp}"

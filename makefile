@@ -1,5 +1,5 @@
 # Single-source file programs to build
-progs   = cable/daemon cable/service cable/mhdrop bin/hex2base32 \
+progs   = cable/daemon cable/service cable/mhdrop cable/hex2base32 \
           cable/eeppriv.jar
 cpextra_EepPriv = /opt/i2p/lib/i2p.jar
 ldextra_daemon  = -lrt
@@ -32,7 +32,7 @@ JLIBS  := $(subst : ,:,$(patsubst %,%:,$(wildcard lib/*.jar)))
 all: $(progs)
 
 clean:
-	$(RM) -r $(progs) obj/*
+	$(RM) -r $(progs) obj/* stage
 
 bin/% cable/%: obj/%.o
 	$(CC) -o $@ $(CFLAGS) $< $(LDFLAGS) $(ldextra_$*) 

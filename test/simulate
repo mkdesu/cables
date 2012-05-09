@@ -8,12 +8,13 @@ scriptdir="${0%"${0##*/}"}"
 cd ${scriptdir:-./}..
 
 
-root=`mktemp -d`
+root=${PWD}/stage
 sinfo "Root dir: ${root}"
+rm -rf ${root}
 
 
 sinfo "Building"
-CFLAGS="-O2 -march=core2 -mfpmath=sse -fomit-frame-pointer -pipe" \
+CFLAGS="-O2 -march=core2 -mfpmath=sse -fomit-frame-pointer -pipe -DTESTING" \
 LDFLAGS="-Wl,-O1,--as-needed,-z,combreloc" make -s
 
 
@@ -31,6 +32,8 @@ export CABLE_I2P=${root}/user1/i2p
 export CABLE_QUEUES=${root}/user1/queues
 export CABLE_INBOX=${root}/user1/inbox
 export CABLE_PUB=${root}/user1/www
+
+export PATH=${root}/mockup:"${PATH}"
 EOF
 
 
@@ -48,11 +51,23 @@ export CABLE_I2P=${root}/user2/i2p
 export CABLE_QUEUES=${root}/user2/queues
 export CABLE_INBOX=${root}/user2/inbox
 export CABLE_PUB=${root}/user2/www
+
+export PATH=${root}/mockup:"${PATH}"
 EOF
+
+
+sinfo "Installing mockup scripts"
+mkdir ${root}/mockup
+cp test/{curl,logger} ${root}/mockup
 
 
 sinfo "Reducing RSA strength"
 sed -i 's/^rsabits=.*/rsabits=1024/' ${root}/stage{1,2}/bin/gen-cable-username
+
+
+sinfo "Removing sudo invocations and i/o redirection"
+sed -i 's/sudo -n -u cable//'  ${root}/stage{1,2}/bin/cable-send
+sed -i '/^sleep/d; /^exec 0/d' ${root}/stage{1,2}/libexec/cable/cabled
 
 
 sinfo "Creating user paths"
@@ -66,6 +81,125 @@ ${root}/stage1/bin/gen-tor-hostname
 ${root}/stage2/bin/gen-tor-hostname
 ${root}/stage1/bin/gen-i2p-hostname
 ${root}/stage2/bin/gen-i2p-hostname
+
+
+sinfo "Initializing www directories"
+cp ${root}/user1/{cable/certs/*.pem,www/cable/certs}
+cp ${root}/user2/{cable/certs/*.pem,www/cable/certs}
+
+mv ${root}/user1/www/{cable,`cat ${root}/user1/cable/certs/username`}
+mv ${root}/user2/www/{cable,`cat ${root}/user2/cable/certs/username`}
+
+
+sinfo "Testing cable-id and cable-ping"
+for u in 1 2; do
+    for tp in user tor i2p; do
+        eval u${u}${tp}=`${root}/stage${u}/bin/cable-id ${tp}`
+    done
+done
+
+for u in 1 2; do
+    for tp in tor i2p; do
+        eval cpresp=\`${root}/stage1/bin/cable-ping \${u${u}user}@\${u${u}${tp}}\`
+        [ "${cpresp}" = "LIBERTE CABLE 3.0" ]
+    done
+done
+
+
+sinfo "Testing synchronous message flow (fetch errors are expected)"
+ccsend() {
+    local u="$1"
+    local desc="$2"
+    local from="$3"
+    local to1="$4"
+    local to2="$5"
+
+    ${root}/stage${u}/bin/cable-send <<EOF
+From: Anon Anon <${from}>
+To: Anon Anon <${to1}>, Anon Anon <${to2}>
+Subject: Test (${desc})
+
+Test
+EOF
+}
+
+ccsend 1 "Tor1 -> Tor2, I2P2 (loop)" ${u1user}@${u1tor} ${u2user}@${u2tor} ${u2user}@${u2i2p}
+ccsend 1 "I2P1 -> Tor2, I2P2 (loop)" ${u1user}@${u1i2p} ${u2user}@${u2tor} ${u2user}@${u2i2p}
+
+ccloop() {
+    local u="$1"
+    local mid="$2"
+    if [ ${u} = 1 ]; then
+        local q=queue
+    else
+        local q=rqueue
+    fi
+
+    (
+        export CABLE_HOME=${root}/stage${u}/libexec/cable/
+        . ${CABLE_HOME}suprofile
+        ${CABLE_HOME}loop ${q} ${mid}
+    )
+}
+
+sed -i 's/\<exit 22\>/exit 222/' ${root}/mockup/curl
+mids=`find ${root}/user1/queues/queue -mindepth 1 -maxdepth 1 -printf '%P\n'`
+for mid in ${mids}; do
+    ccloop 1 ${mid} || :
+    ccloop 2 ${mid}
+    ccloop 1 ${mid}
+    ccloop 2 ${mid}
+    ccloop 1 ${mid}
+    ccloop 1 ${mid}.del
+    ccloop 2 ${mid}.del
+done
+
+
+sinfo "Testing daemon operation"
+ccdaemon() {
+    local pid1= pid2= chkdir=
+
+    ${root}/stage1/libexec/cable/cabled & pid1=$!
+    ${root}/stage2/libexec/cable/cabled & pid2=$!
+
+    for chkdir in user{1,2}/queues; do
+        while find ${root}/${chkdir} -mindepth 2 -maxdepth 2 | grep -q .; do
+            sleep 2
+        done
+    done
+
+    kill ${pid1} ${pid2}
+    wait ${pid1} ${pid2} || :
+
+    if find ${root} -path '*/www/*queue/*' | grep -q .; then
+        echo "www leftovers"
+        return 1
+    fi
+}
+
+ccsend 1 "Tor1 -> Tor2, I2P2 (daemon)" ${u1user}@${u1tor} ${u2user}@${u2tor} ${u2user}@${u2i2p}
+ccsend 1 "I2P1 -> Tor2, I2P2 (daemon)" ${u1user}@${u1i2p} ${u2user}@${u2tor} ${u2user}@${u2i2p}
+ccsend 2 "Tor2 -> Tor1, I2P1 (daemon)" ${u2user}@${u2tor} ${u1user}@${u1tor} ${u1user}@${u1i2p}
+ccsend 2 "I2P2 -> Tor1, I2P1 (daemon)" ${u2user}@${u2i2p} ${u1user}@${u1tor} ${u1user}@${u1i2p}
+
+faketmp=`mktemp -d --tmpdir=${root}/user1/queues/queue`
+touch ${faketmp}/test{1,2}
+fakemid=${root}/user1/queues/rqueue/012345abcd012345abcd012345abcd012345abcd.new
+cp -r ${faketmp} ${fakemid}
+touch --date="2 days ago" ${faketmp} ${fakemid}
+
+sed -i 's/\<exit 222\>/exit 22/' ${root}/mockup/curl
+ccdaemon
+
+
+sinfo "Testing message expiration"
+ccsend 1 "Tor1 -> Tor1, Tor2 (expire)"       ${u1user}@${u1tor} ${u1user}@${u1tor} ${u2user}@${u2tor}
+ccsend 2 "Tor2 -> Tor2, Tor1 (expire)"       ${u2user}@${u2tor} ${u2user}@${u2tor} ${u1user}@${u1tor}
+ccsend 2 "Tor1 -> Tor1, Tor2 (expire, fake)" ${u1user}@${u1tor} ${u1user}@${u1tor} ${u2user}@${u2tor}
+ccsend 1 "Tor2 -> Tor2, Tor1 (expire, fake)" ${u2user}@${u2tor} ${u2user}@${u2tor} ${u1user}@${u1tor}
+
+sed -i 's/^sectmout=.*/sectmout=17/' ${root}/stage{1,2}/libexec/cable/validate
+ccdaemon
 
 
 sinfo "Success"

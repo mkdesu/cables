@@ -7,46 +7,51 @@ Authentication and encryption
 Permanent keys:
   + public X.509   [ca.pem] (root CA) + username (hash of [ca.pem])
   + public X.509   [verify.pem]                  (issued by root CA)
-  + public DH key  [peer.sig]                    (signed, verifiable with [verify.pem])
   + private key    [sign.pem]                    (corresponding to X.509 [verify.pem])
-  + private DH key [derive.pem]                  (corresponding to DH [peer.pem])
 
 Ephemeral keys:
-  + public DH key  [peereph.sig]                 (signed, verifiable with [verify.pem])
-  + private DH key [deriveeph.pem]               (corresponding to DH [peereph.pem])
+  + public DH key  [speer.sig or rpeer.sig]      (signed, verifiable with [verify.pem])
+  + private DH key [derive.pem]                  (corresponding to DH [s/rpeer.pem])
   + shared         [shared.key]
 
 Key derivation:
-  + sender's ephemeral DH key [peereph.pem] or [deriveeph.pem]
-  + recipient's static DH key [peer.pem]    or [derive.pem]
-  + MAC/MAC2/MAC3 keys are different hashes of the derived [shared.key]
-    (ephemeral-static key agreement, http://tools.ietf.org/html/rfc2785)
+  + sender's    ephemeral DH key [speer.der] or private [derive.pem]
+  + recipient's ephemeral DH key [rpeer.der] or private [derive.pem]
+  + MAC_{send,recv,ack} keys are different hash functions derived from [shared.key]
+    (ephemeral-ephemeral key agreement: http://tools.ietf.org/html/rfc2785)
 
-<send>
+<send> (sender)
   + [message]                                                    <- <input>
-  + [peer.sig]      -> verified  with recipient's [verify.pem]   -> [peer.der]
-  + [deriveeph.pem] + [peer.der] -> DH key derivation            -> [shared.key]
-  + [peereph.der]   -> signed    with sender's    [sign.pem]     -> [peereph.sig]
+  + [peer request]                                               -> <send>
+
+<peer> (recipient)
+  + [rpeer.der]     -> signed    with recipient's [sign.pem]     -> [rpeer.sig]
+  + [rpeer.sig]                                                  -> <send>
+
+<send> (contd., sender)
+  + [rpeer.sig]                                                  <- <receive>
+  + [rpeer.sig]     -> verified  with recipient's [verify.pem]   -> [rpeer.der]
+  + [derive.pem]  + [rpeer.der] -> DH key derivation             -> [shared.key]
+  + [speer.der]     -> signed    with sender's    [sign.pem]     -> [speer.sig]
   + [message]       -> encrypted with shared      [shared.key]   -> [message.enc]
-  + [message.enc] + [peereph.sig] + MAC(message)                 -> <send>
+  + [message.enc] + [speer.sig] + MAC_send(message)              -> <send>
 
-<recv>
-  + [message.enc] + [peereph.sig] + MAC(message)                 <- <receive>
-  + [peereph.sig]   -> verified  with sender's    [verify.pem]   -> [peereph.der]
-  + [derive.pem]  + [peereph.der] -> DH key derivation           -> [shared.key]
+<recv> (recipient)
+  + [message.enc] + [speer.sig] + MAC_send(message)               <- <receive>
+  + [speer.sig]     -> verified  with sender's    [verify.pem]   -> [speer.der]
+  + [derive.pem]  + [speer.der] -> DH key derivation             -> [shared.key]
   + [message.enc]   -> decrypted with shared      [shared.key]   -> [message]
-  + [message]       -> verified  with shared      MAC
-  + [message]       -> signed    with shared      MAC2           -> MAC2([message])
-  + MAC2([message])                                              -> <send>
+  + [message]       -> verified  with shared      MAC_send
+  + MAC_recv([message])                                          -> <send>
 
-<ack>
-  + MAC2([message])                                              <- <receive>
-  + MAC2([message]) -> verified  with shared      MAC2
-  + MAC3                                                         -> <send>
+<ack> (sender)
+  + MAC_recv([message])                                          <- <receive>
+  + [message]       -> verified  with shared      MAC_recv
+  + MAC_ack                                                      -> <send>
 
-<fin>
-  + MAC3                                                         <- <receive>
-  + MAC3            -> verified  with shared      MAC3
+<fin> (recipient)
+  + MAC_ack                                                      <- <receive>
+  + MAC_ack         -> compared  with shared      MAC_ack
 
 
 Protocol
@@ -60,7 +65,6 @@ Protocol
 
   + resistant against fingerprinting if username is unknown
   + vulnerable to DoS (e.g., many MSG requests) if username is known
-  + vulnerable to message replay
 
   + each loop type is mutually exclusive for a given (r)queue/<msgid>
   + all code blocks are restartable (e.g., after crash)
@@ -68,9 +72,9 @@ Protocol
 
   + <hostname>/<username>/                         transient public directory w/o list permission
                   /certs/{ca.pem,verify.pem}       public certificates
-                  /certs/peer.sig                  public static peer key
                   /queue/<msgid>                   outgoing message <msgid>
                   /queue/<msgid>.key               outgoing message <msgid>'s ephemeral peer key
+                  /rqueue/<msgid>.key              incoming message <msgid>'s ephemeral peer key
                   /request/...                     service interface
 
   + /cables/                                       private directory
@@ -78,74 +82,97 @@ Protocol
                   /rqueue/<msgid>/                 incoming message <msgid> work dir
 
   + [send]        (MUA-invoked script)          writes to /cables/queue
-  + [service]     (fast and secure web service) writes to /cables/{queue,rqueue}
-  + [crypto loop] writes to /cables/{queue,rqueue}, MUA inbox directory;
-                  reads from certs directory
-  + [fetch  loop] writes to /cables/{queue,rqueue}; reads from network
-  + [comm   loop] writes to /{<username>,cables}/{queue,rqueue}, network;
+  + [service]     (fast and secure web service) writes to /cables/(r)queue
+  + [crypto loop] writes to /cables/(r)queue, MUA inbox directory;
+                  reads from certs (public, private) directories
+  + [fetch  loop] writes to /cables/(r)queue, network
+  + [comm   loop] writes to /{<username>,cables}/(r)queue, network;
                   reads username from certs directory
 
 
-<send>
+<send> (sender)
   [send]
   + generate random 160-bit (40 hex digits) <msgid>
-  + prepare /cables/queue/<msgid>/{message{,.hdr},username,{,s}hostname}
+  + prepare /cables/queue/<msgid>/{message{,.hdr},{,s}{user,host}name}
   + create  /cables/queue/<msgid>/send.req
   * (atomic via rename from /cables/queue/tmp.<random>/<msgid>/)
 
   [fetch loop]
   + check   /cables/queue/<msgid>/send.req
-  + fetch   <hostname>/<username>/certs/{{ca,verify}.pem,peer.sig} -> /cables/queue/<msgid>/
+  + request <hostname>/<username>/request/msg/<msgid>/<shostname>/<susername>
+  + fetch   <hostname>/<username>/rqueue/<msgid>.key    -> /cables/queue/<msgid>/rpeer.sig
+  + fetch   <hostname>/<username>/certs/{ca,verify}.pem -> /cables/queue/<msgid>/
   + rename  /cables/queue/<msgid>/send.req         -> send.rdy
 
   [crypto loop]
   + check   /cables/queue/<msgid>/send.rdy
-  + prepare /cables/queue/<msgid>/{peereph.sig,message.enc,{send,recv,ack}.mac}
+  + prepare /cables/queue/<msgid>/{speer.sig,message.enc,{send,recv,ack}.mac}
   + rename  /cables/queue/<msgid>/send.rdy         -> send.ok  (success)
   +                                                -> send.req (crypto fail)
-  + remove  /cables/queue/<msgid>/{message,{ca,verify}.pem,peer.sig}  (if success)
+  + remove  /cables/queue/<msgid>/{message,{ca,verify}.pem,rpeer.sig}  (if success)
 
   [comm loop]
   + check   /cables/queue/<msgid>/send.ok
   + checkno /cables/queue/<msgid>/ack.ok
-  + copy    /cables/queue/<msgid>/peereph.sig      -> //<susername>/queue/<msgid>.key (if not exists)
+  + copy    /cables/queue/<msgid>/speer.sig        -> //<susername>/queue/<msgid>.key (if not exists)
   + copy    /cables/queue/<msgid>/message.enc      -> //<susername>/queue/<msgid>     (atomic, if not exists)
   + read    /cables/queue/<msgid>/send.mac         (128 hex digits)
-  + request <hostname>/<username>/request/msg/<msgid>/<sendmac>/<shostname>/<susername> -> send.ans
+  + request <hostname>/<username>/request/snd/<msgid>/<sendmac>
 
 
-<recv>
+<peer> (recipient)
   [service]
-  + upon    msg/<msgid>/<sendmac>/<hostname>/<username>
-  + checkno /cables/rqueue/<msgid>
+  + upon    msg/<msgid>/<hostname>/<username>
+  + checkno /cables/rqueue/<msgid>                 (ok and skip if exists)
   + create  /cables/rqueue/<msgid>.new/            (ok if exists)
-  + write   /cables/rqueue/<msgid>.new/{username,hostname,send.mac}
-  + create  /cables/rqueue/<msgid>.new/recv.req    (ok if exists)
+  + write   /cables/rqueue/<msgid>.new/{username,hostname}
+  + create  /cables/rqueue/<msgid>.new/peer.req    (ok if exists)
   + rename  /cables/rqueue/<msgid>.new             -> <msgid>
+
+  [crypto loop]
+  + check   /cables/rqueue/<msgid>/peer.req
+  + prepare /cables/rqueue/<msgid>/{derive.pem,rpeer.sig}
+  + rename  /cables/rqueue/<msgid>/peer.req        -> peer.ok (success)
+
+  [comm loop]
+  + check   /cables/rqueue/<msgid>/peer.ok
+  + checkno /cables/rqueue/<msgid>/recv.ok
+  + copy    /cables/rqueue/<msgid>/rpeer.sig       -> //<rusername>/rqueue/<msgid>.key (atomic, if not exists)
+
+
+<recv> (recipient)
+  [service]
+  + upon    snd/<msgid>/<sendmac>
+  + check   /cables/rqueue/<msgid>/peer.ok
+  + write   /cables/rqueue/<msgid>/send.mac        (skip if exists)
+  + create  /cables/rqueue/<msgid>/recv.req        (atomic, ok if exists)
+  + touch   /cables/rqueue/<msgid>/                (if recv.req did not exist)
 
   [fetch loop]
   + check   /cables/rqueue/<msgid>/recv.req
+  + check   /cables/rqueue/<msgid>/send.mac
+  + checkno /cables/rqueue/<msgid>/recv.{rdy,ok}   (in this order)
   + fetch   <hostname>/<username>/queue/<msgid>     -> /cables/rqueue/<msgid>/message.enc
-  + fetch   <hostname>/<username>/queue/<msgid>.key -> /cables/rqueue/<msgid>/peereph.sig
+  + fetch   <hostname>/<username>/queue/<msgid>.key -> /cables/rqueue/<msgid>/speer.sig
   + fetch   <hostname>/<username>/certs/{ca,verify}.pem -> /cables/rqueue/<msgid>/
   + rename  /cables/rqueue/<msgid>/recv.req         -> recv.rdy
 
   [crypto loop]
   + check   /cables/rqueue/<msgid>/recv.rdy
   + prepare /cables/rqueue/<msgid>/{message{,.hdr},{recv,ack}.mac}
-  + verify  /cables/rqueue/<msgid>/send.mac
+  + verify  /cables/rqueue/<msgid>/send.mac        (remove if fail)
   + create  <mua message>                          <- /cables/rqueue/<msgid>/message
   + rename  /cables/rqueue/<msgid>/recv.rdy        -> recv.ok  (success)
   +                                                -> recv.req (crypto fail)
-  + remove  /cables/rqueue/<msgid>/{message{,.enc},{ca,verify}.pem,peereph.sig,send.mac}  (if success)
+  + remove  /cables/rqueue/<msgid>/{message{,.enc},{ca,verify,derive}.pem,{r,s}peer.sig,send.mac}  (if success)
 
   [comm loop]
   + check   /cables/rqueue/<msgid>/recv.ok
   + read    /cables/rqueue/<msgid>/recv.mac        (128 hex digits)
-  + request <hostname>/<username>/request/rcp/<msgid>/<recvmac> -> recv.ans
+  + request <hostname>/<username>/request/rcp/<msgid>/<recvmac>
 
 
-<ack>
+<ack> (sender)
   [service]
   + upon    rcp/<msgid>/<recvmac>
   + check   /cables/queue/<msgid>/send.ok
@@ -158,15 +185,15 @@ Protocol
   + checkno /cables/queue/<msgid>/ack.ok
   + create  <mua acknowledge>
   + rename  /cables/queue/<msgid>/ack.req          -> ack.ok
-  + remove  /cables/queue/<msgid>/{message.enc,peereph.sig,{send,recv}.mac}  (if success)
+  + remove  /cables/queue/<msgid>/{message.enc,speer.sig,{send,recv}.mac}  (if success)
 
   [comm loop]
   + check   /cables/queue/<msgid>/ack.ok
   + remove  //<susername>/queue/<msgid>{,.key}     (if exists)
   + read    /cables/queue/<msgid>/ack.mac          (128 hex digits)
-  + request <hostname>/<username>/request/ack/<msgid>/<ackmac> (wait) -> ack.ans
+  + request <hostname>/<username>/request/ack/<msgid>/<ackmac>  (wait for response)
   + rename  /cables/queue/<msgid>                  -> <msgid>.del
-  (if ack is lost due to MITM attack, receiver will keep requesting rcp/<msgid>/<recvmac>)
+  (if ack is lost due to MITM attack, recipient will keep requesting rcp/<msgid>/<recvmac>)
 
   -and/or-
 
@@ -175,7 +202,7 @@ Protocol
   + remove  /cables/queue/<msgid>.del/
 
 
-<fin>
+<fin> (recipient)
   [service]
   + upon    ack/<msgid>/<ackmac>
   + check   /cables/rqueue/<msgid>/recv.ok
@@ -184,6 +211,7 @@ Protocol
 
   [comm loop]
   + check   /cables/rqueue/<msgid>.del/
+  + remove  //<rusername>/rqueue/<msgid>.key       (if exists)
   + remove  /cables/rqueue/<msgid>.del/
 
 
@@ -198,7 +226,7 @@ Watch list (for <msgid>s of 40 hex digits):
   + /cables/rqueue/ <msgid>, <msgid>.del              (inotify: moved_to)
 
   + <msgid>:     non-blocking lock attempt
-  + <msgid>.del: blocking lock (with timeout)
+  + <msgid>.del: blocking lock (to let renaming action complete, with timeout)
 
 Retry policies:
   + retry every X min. (+ random component)
@@ -207,14 +235,15 @@ Validation: upon reaching max age (from <msgid>/username timestamp):
   (mutually exclusive with all loop types)
 
   + (queue)  create  <mua message>
-                 send.req/rdy:        failed to fetch certificates and encrypt message
-                 send.ok + no ack.ok: failed to send message and receive receipt
-                 ack.ok:              failed to acknowledge receipt
+                 [if]   ack.ok:       failed to acknowledge receipt
+                 [elif] send.ok:      failed to send message and receive receipt
+                 [else]               failed to peer and encrypt message
   + (queue)  rename  /cables/queue/<msgid>  -> <msgid>.del
 
   + (rqueue) create  <mua message>
-                 recv.req/rdy:        failed to fetch and decrypt message
-                 recv.ok:             failed to send receipt and receive acknowledgment
+                 [if]   recv.ok:      failed to send receipt and receive acknowledgment
+                 [elif] recv.req/rdy: failed to fetch and decrypt message
+                 [else]               failed to generate peer key
   + (rqueue) rename  /cables/rqueue/<msgid> -> <msgid>.del
 
 

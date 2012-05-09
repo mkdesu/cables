@@ -40,11 +40,12 @@ error() {
 
 # Sanity checks
 [ ${#msgid} = 40 ] || error "bad msgid"
-[ -r "${msgdir}" ] || error "bad permissions"
+[ -r "${msgdir}" ] || error "cannot access"
 
 
 # .del actions: blocking lock (to let the renaming action finish)
 if [ "${dirid}" != "${msgid}" ]; then
+
     if [ ${qtype} = queue ]; then
 
         if [ -e "${msgdir}" ]; then
@@ -62,7 +63,9 @@ if [ "${dirid}" != "${msgid}" ]; then
         fi
 
     fi
+
 else
+
     if [ ${qtype} = queue ]; then
 
         # non-blocking lock of combined operations
@@ -73,6 +76,7 @@ else
         "${validate}" ${qtype} "${msgid}"
         set +e
 
+        # handle ack first, to retry send if failed
         if   [ -e "${msgdir}"/ack.ok  ]; then
             "${comm}"   ack  "${msgid}"
         elif [ -e "${msgdir}"/ack.req ]; then
@@ -108,18 +112,28 @@ else
         "${validate}" ${qtype} "${msgid}"
         set +e
 
-        if   [ -e "${msgdir}"/recv.req ]; then
-                 "${fetch}"  recv "${msgid}" && \
-                 "${crypto}" recv "${msgid}" && \
-            exec "${comm}"   recv "${msgid}"
-        elif [ -e "${msgdir}"/recv.rdy ]; then
-                 "${crypto}" recv "${msgid}" && \
-            exec "${comm}"   recv "${msgid}"
+        if   [ -e "${msgdir}"/recv.rdy ]; then
+            "${crypto}" recv "${msgid}" && \
+            "${comm}"   recv "${msgid}"
         elif [ -e "${msgdir}"/recv.ok  ]; then
-            exec "${comm}"   recv "${msgid}"
+            "${comm}"   recv "${msgid}"
+        elif [ -e "${msgdir}"/recv.req ]; then
+            "${fetch}"  recv "${msgid}" && \
+            "${crypto}" recv "${msgid}" && \
+            "${comm}"   recv "${msgid}"
+        fi
+
+        if [ -e "${msgdir}"/peer.req ]; then
+                 "${crypto}" peer "${msgid}" && \
+            exec "${comm}"   peer "${msgid}"
+        elif [ -e "${msgdir}"/peer.ok  ]; then
+            if [ ! -e "${msgdir}"/recv.ok  ]; then
+                exec "${comm}" peer "${msgid}"
+            fi
         else
-            error "recv.req/rdy/ok not found"
+            error "peer.req/ok not found"
         fi
 
     fi
+
 fi

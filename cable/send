@@ -61,8 +61,9 @@ for addr in "${fromaddr}" ${addresses}; do
 done
 
 
-# Extract the from-host
-echo ${fromaddr} | cut -d@ -f2 > ${tmpdir}/shostname
+# Extract the from-user and from-host
+echo ${fromaddr%@*} > ${tmpdir}/susername
+echo ${fromaddr#*@} > ${tmpdir}/shostname
 
 
 # Remove Bcc: header and replace Date: with a UTC one:
@@ -81,11 +82,12 @@ for addr in ${addresses}; do
     mkdir ${tmpdir}/${msgid}
 
     # extract username and hostname from address, and generate respective files
-    echo ${addr} | cut -d@ -f1 > ${tmpdir}/${msgid}/username
-    echo ${addr} | cut -d@ -f2 > ${tmpdir}/${msgid}/hostname
+    echo ${addr%@*} > ${tmpdir}/${msgid}/username
+    echo ${addr#*@} > ${tmpdir}/${msgid}/hostname
 
     # copy the sanitized message (assume the files will not be modified later)
-    ln ${tmpdir}/message ${tmpdir}/message.hdr ${tmpdir}/shostname \
+    ln ${tmpdir}/message ${tmpdir}/message.hdr \
+       ${tmpdir}/susername ${tmpdir}/shostname \
        ${tmpdir}/${msgid}/
 
     # atomically move directory to queue dir, and create send.req indicator

@@ -11,19 +11,18 @@ cmd="$1"
 ssldir="$2"
 msgdir="$3"
 
+base32="${CABLE_HOME}"hex2base32
 modp18="${CABLE_HOME}"rfc3526-modp-18.pem
 
 sigalg=sha512
 encalg=aes256
 enchash=sha256
 
-base32=hex2base32
-
 
 # Command-line parameters
-if [ \( "${cmd}" != send -a "${cmd}" != recv \) \
+if [ \( "${cmd}" != send  -a  "${cmd}" != peer  -a  "${cmd}" != recv \) \
      -o  ! -d "${ssldir}"  -o  ! -d "${msgdir}" ]; then
-    echo "Format: $0 send|recv <ssldir> <msgdir>"
+    echo "Format: $0 send|peer|recv <ssldir> <msgdir>"
     exit 1
 fi
 
@@ -91,21 +90,26 @@ EOF
 # ${certdir}/ca.pem      : X.509 self-signed root CA certificate
 # ${certdir}/verify.pem  : X.509 signature verification certificate (issued by root CA)
 # ${keysdir}/sign.pem    : private signature key
-# ${keysdir}/derive.pem  : private static DH key
 certdir="${ssldir}"/certs
 keysdir="${ssldir}"/private
 
 
 # Input and output files are in ${msgdir}
 #
-# <send>
-#     in:  message, username, ca.pem, verify.pem, peer.sig
-#     out: peereph.sig, message.enc, {send,recv,ack}.mac
+# <peer>
 #
-# ---> peereph.sig, message.enc, send.mac
+#     out: derive.pem, rpeer.sig
+#
+# <--- rpeer.sig
+#
+# <send>
+#     in:  message, username, {ca,verify}.pem, rpeer.sig
+#     out: speer.sig, message.enc, {send,recv,ack}.mac
+#
+# ---> speer.sig, message.enc, send.mac
 #
 # <recv>
-#     in:  message.enc, username, send.mac, ca.pem, verify.pem, peereph.sig
+#     in:  message.enc, username, send.mac, {ca,verify,derive}.pem, speer.sig
 #     out: message, {recv,ack}.mac
 #
 # <--- recv.mac
@@ -114,42 +118,64 @@ keysdir="${ssldir}"/private
 #
 # ---> ack.mac
 case ${cmd} in
+peer)
+    rm -f -- "${msgdir}"/derive.pem "${msgdir}"/rpeer.der "${msgdir}"/rpeer.sig
+
+    # generate ephemeral peer key
+    openssl genpkey -paramfile "${modp18}" \
+                    -out "${msgdir}"/derive.pem
+
+    # extract and sign ephemeral public peer key
+    openssl pkey -pubout -outform der        \
+                 -in  "${msgdir}"/derive.pem \
+                 -out "${msgdir}"/rpeer.der
+
+    openssl cms -sign -noattr -binary -md ${sigalg} -nodetach -nocerts -outform pem \
+                -signer   "${certdir}"/verify.pem \
+                -inkey    "${keysdir}"/sign.pem   \
+                -in       "${msgdir}"/rpeer.der   \
+                -out      "${msgdir}"/rpeer.sig
+
+    rm -- "${msgdir}"/rpeer.der
+    ;;
+
+
 send)
-    rm -f -- "${msgdir}"/deriveeph.pem "${msgdir}"/peereph.der "${msgdir}"/peer.der    \
-             "${msgdir}"/peereph.sig   "${msgdir}"/shared.key  "${msgdir}"/message.enc \
-             "${msgdir}"/send.mac      "${msgdir}"/recv.mac    "${msgdir}"/ack.mac
+    rm -f -- "${msgdir}"/derive.pem "${msgdir}"/speer.der  "${msgdir}"/rpeer.der   \
+             "${msgdir}"/speer.sig  "${msgdir}"/shared.key "${msgdir}"/message.enc \
+             "${msgdir}"/send.mac   "${msgdir}"/recv.mac   "${msgdir}"/ack.mac
 
     # verify certificates chain
     verify_certs "${msgdir}"
 
-    # verify and extract signed recipient's static public peer key
+    # verify and extract signed recipient's ephemeral public peer key
     openssl cms -verify \
                 -x509_strict -policy_check -purpose smimesign -check_ss_sig -inform pem \
                 -CAfile   "${msgdir}"/ca.pem -CApath /dev/null \
                 -certfile "${msgdir}"/verify.pem               \
-                -in       "${msgdir}"/peer.sig                 \
-                -out      "${msgdir}"/peer.der
+                -in       "${msgdir}"/rpeer.sig                \
+                -out      "${msgdir}"/rpeer.der
 
     # generate ephemeral peer key
     openssl genpkey -paramfile "${modp18}" \
-                    -out "${msgdir}"/deriveeph.pem
+                    -out "${msgdir}"/derive.pem
 
     # derive (large) shared secret
-    openssl pkeyutl -derive -peerform der              \
-                    -inkey   "${msgdir}"/deriveeph.pem \
-                    -peerkey "${msgdir}"/peer.der      \
+    openssl pkeyutl -derive -peerform der           \
+                    -inkey   "${msgdir}"/derive.pem \
+                    -peerkey "${msgdir}"/rpeer.der  \
                     -out     "${msgdir}"/shared.key
 
     # extract and sign ephemeral public peer key
-    openssl pkey -pubout -outform der           \
-                 -in  "${msgdir}"/deriveeph.pem \
-                 -out "${msgdir}"/peereph.der
+    openssl pkey -pubout -outform der        \
+                 -in  "${msgdir}"/derive.pem \
+                 -out "${msgdir}"/speer.der
 
     openssl cms -sign -noattr -binary -md ${sigalg} -nodetach -nocerts -outform pem \
-                -signer   "${certdir}"/verify.pem  \
-                -inkey    "${keysdir}"/sign.pem    \
-                -in       "${msgdir}"/peereph.der  \
-                -out      "${msgdir}"/peereph.sig
+                -signer   "${certdir}"/verify.pem \
+                -inkey    "${keysdir}"/sign.pem   \
+                -in       "${msgdir}"/speer.der   \
+                -out      "${msgdir}"/speer.sig
 
     # deterministically derive encryption and MAC keys from shared secret
     enckey=`openssl dgst -mac hmac -${enchash} -macopt key:encrypt "${msgdir}"/shared.key | cut -d' ' -f2`
@@ -180,15 +206,15 @@ send)
                 -in        "${msgdir}"/message     \
                 -out       "${msgdir}"/message.enc
 
-    rm -- "${msgdir}"/deriveeph.pem "${msgdir}"/peereph.der "${msgdir}"/peer.der \
+    rm -- "${msgdir}"/derive.pem "${msgdir}"/speer.der "${msgdir}"/rpeer.der \
           "${msgdir}"/shared.key
 
     ;;
 
 
 recv)
-    rm -f -- "${msgdir}"/peereph.der "${msgdir}"/shared.key "${msgdir}"/message  \
-             "${msgdir}"/send.cmp    "${msgdir}"/recv.mac   "${msgdir}"/ack.mac
+    rm -f -- "${msgdir}"/speer.der "${msgdir}"/shared.key "${msgdir}"/message \
+             "${msgdir}"/send.cmp  "${msgdir}"/recv.mac   "${msgdir}"/ack.mac
 
     # verify certificates chain
     verify_certs "${msgdir}"
@@ -198,13 +224,13 @@ recv)
                 -x509_strict -policy_check -purpose smimesign -check_ss_sig -inform pem \
                 -CAfile   "${msgdir}"/ca.pem -CApath /dev/null \
                 -certfile "${msgdir}"/verify.pem               \
-                -in       "${msgdir}"/peereph.sig              \
-                -out      "${msgdir}"/peereph.der
+                -in       "${msgdir}"/speer.sig                \
+                -out      "${msgdir}"/speer.der
 
     # derive (large) shared secret
-    openssl pkeyutl -derive -peerform der            \
-                    -inkey   "${keysdir}"/derive.pem \
-                    -peerkey "${msgdir}"/peereph.der \
+    openssl pkeyutl -derive -peerform der           \
+                    -inkey   "${msgdir}"/derive.pem \
+                    -peerkey "${msgdir}"/speer.der  \
                     -out     "${msgdir}"/shared.key
 
     # deterministically derive encryption and MAC keys from shared secret
@@ -241,7 +267,7 @@ recv)
         error "MAC verification failed"
     fi
 
-    rm -- "${msgdir}"/peereph.der "${msgdir}"/shared.key "${msgdir}"/send.cmp
+    rm -- "${msgdir}"/speer.der "${msgdir}"/shared.key "${msgdir}"/send.cmp
 
     ;;
 

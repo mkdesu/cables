@@ -70,47 +70,35 @@ check_userhost "${username}" "${hostname}"
 
 # Classify message state and create an appropriate MUA notification
 if [ ${qtype} = queue ]; then
-
     # message.hdr is available, but [vfy] must be replaced with [fail]
-    formail -f -i "Date: ${date}" < "${msgdir}"/message.hdr \
-        | sed "${subjrep}" > "${msgdir}"/message.rej
+    formail -f -i "Date: ${date}" < "${msgdir}"/message.hdr | sed "${subjrep}"
 
-    if [ -e "${msgdir}"/send.req  -o  -e "${msgdir}"/send.rdy ]; then
-        echo "Failed to fetch certificates and encrypt message for ${username}@${hostname}" \
-            >> "${msgdir}"/message.rej
+    if [ -e "${msgdir}"/ack.ok ]; then
+        echo "Failed to acknowledge receipt received from ${username}@${hostname}"
     elif [ -e "${msgdir}"/send.ok ]; then
-        if [ ! -e "${msgdir}"/ack.ok ]; then
-            echo "Failed to send message and receive receipt from ${username}@${hostname}"  \
-                >> "${msgdir}"/message.rej
-        else
-            echo "Failed to acknowledge receipt received from ${username}@${hostname}"      \
-                >> "${msgdir}"/message.rej
-        fi
+        echo "Failed to send message and receive receipt from ${username}@${hostname}"
     else
-        error "inconsistent state"
+        echo "Failed to peer and encrypt message for ${username}@${hostname}"
     fi
-
 else
-
-    if [ -e "${msgdir}"/recv.req  -o  -e "${msgdir}"/recv.rdy ]; then
+    if [ -e "${msgdir}"/recv.ok ]; then
+        # message.hdr is available
+        formail -f -i "Date: ${date}" < "${msgdir}"/message.hdr
+        echo "Failed to send receipt and receive acknowledgment from ${username}@${hostname}"
+    else
         # no message.hdr is available at this point
         msgdate=$(date -d "$(stat -c %y "${tsfile}")" -uR)
+        formail -f -I "From: <${username}@${hostname}>"         \
+                   -I "Old-Date: ${msgdate}" -I "Date: ${date}" \
+                   -I "Subject: [fail]" <&-
 
-        (formail -f -I "From: <${username}@${hostname}>"         \
-                    -I "Old-Date: ${msgdate}" -I "Date: ${date}" \
-                    -I "Subject: [fail]" <&-;                    \
-            echo "Failed to fetch and decrypt message from ${username}@${hostname}") \
-            > "${msgdir}"/message.rej
-    elif [ -e "${msgdir}"/recv.ok ]; then
-        # message.hdr is available
-        (formail -f -i "Date: ${date}" < "${msgdir}"/message.hdr; \
-            echo "Failed to send receipt and receive acknowledgment from ${username}@${hostname}") \
-            > "${msgdir}"/message.rej
-    else
-        error "inconsistent state"
+        if [ -e "${msgdir}"/recv.req  -o  -e "${msgdir}"/recv.rdy ]; then
+            echo "Failed to fetch and decrypt message from ${username}@${hostname}"
+        else
+            echo "Failed to generate peer key for message from ${username}@${hostname}"
+        fi
     fi
-
-fi
+fi > "${msgdir}"/message.rej
 
 
 # Deliver the reject message

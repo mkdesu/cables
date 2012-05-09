@@ -57,9 +57,15 @@
   retry and limits strategies
   wait time for too many processes can be long, since SIGCHLD interrupts sleep
 */
+#ifndef TESTING
 #define RETRY_TMOUT 300
 #define MAX_PROC    100
 #define WAIT_PROC   300
+#else
+#define RETRY_TMOUT 10
+#define MAX_PROC    5
+#define WAIT_PROC   5
+#endif
 
 /* environment variables */
 #define CABLE_MOUNT  "CABLE_MOUNT"
@@ -92,7 +98,15 @@ static void flog(int priority, const char *format, ...) {
     va_list ap;
 
     va_start(ap, format);
+
+#ifndef TESTING
     vsyslog(priority, format, ap);
+#else
+    fprintf(stderr, "[%d] cable: ", priority);
+    vfprintf(stderr, format, ap);
+    fprintf(stderr, "\n");
+#endif
+
     va_end(ap);
 }
 
@@ -120,8 +134,10 @@ static void sig_handler(int signum) {
             /* flog(LOG_NOTICE, "signal caught: %d", signum); */
             stop = 1;
 
+#ifndef TESTING
             /* kill pgroup; also sends signal to self, but stop=1 prevents recursion */
             kill(0, SIGTERM);
+#endif
         }
     }
 }

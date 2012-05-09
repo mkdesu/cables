@@ -1,7 +1,7 @@
 #!/bin/sh -e
 
 if [ $# != 2 ]; then
-    echo "Format: $0 send|recv|ack <msgid>"
+    echo "Format: $0 send|peer|recv|ack <msgid>"
     exit 1
 fi
 
@@ -63,13 +63,26 @@ send)
         if "${cms}" ${cmd} ${ssldir} ${queue}/"${msgid}" 2>/dev/null; then
             mv ${queue}/"${msgid}"/${cmd}.rdy ${queue}/"${msgid}"/${cmd}.ok
             rm ${queue}/"${msgid}"/message    ${queue}/"${msgid}"/ca.pem \
-               ${queue}/"${msgid}"/verify.pem ${queue}/"${msgid}"/peer.sig
+               ${queue}/"${msgid}"/verify.pem ${queue}/"${msgid}"/rpeer.sig
         else
             mv ${queue}/"${msgid}"/${cmd}.rdy ${queue}/"${msgid}"/${cmd}.req
             error "${cmd} failed"
         fi
     else
         error "${cmd}.rdy not found"
+    fi
+    ;;
+
+peer)
+    # <peer> [crypto loop]
+    if [ -e ${rqueue}/"${msgid}"/${cmd}.req ]; then
+        if "${cms}" ${cmd} ${ssldir} ${rqueue}/"${msgid}" 2>/dev/null; then
+            mv ${rqueue}/"${msgid}"/${cmd}.req ${rqueue}/"${msgid}"/${cmd}.ok
+        else
+            error "${cmd} failed"
+        fi
+    else
+        error "${cmd}.req not found"
     fi
     ;;
 
@@ -97,11 +110,13 @@ recv)
 
             deliver ${inbox} ${rqueue}/"${msgid}"/message.ibx
 
-            mv ${rqueue}/"${msgid}"/${cmd}.rdy  ${rqueue}/"${msgid}"/${cmd}.ok
-            rm ${rqueue}/"${msgid}"/message     ${rqueue}/"${msgid}"/message.enc \
-               ${rqueue}/"${msgid}"/ca.pem      ${rqueue}/"${msgid}"/verify.pem  \
-               ${rqueue}/"${msgid}"/peereph.sig ${rqueue}/"${msgid}"/send.mac
+            mv ${rqueue}/"${msgid}"/${cmd}.rdy ${rqueue}/"${msgid}"/${cmd}.ok
+            rm ${rqueue}/"${msgid}"/message    ${rqueue}/"${msgid}"/message.enc \
+               ${rqueue}/"${msgid}"/ca.pem     ${rqueue}/"${msgid}"/verify.pem  \
+               ${rqueue}/"${msgid}"/derive.pem ${rqueue}/"${msgid}"/rpeer.sig   \
+               ${rqueue}/"${msgid}"/speer.sig  ${rqueue}/"${msgid}"/send.mac
         else
+            rm ${rqueue}/"${msgid}"/send.mac
             mv ${rqueue}/"${msgid}"/${cmd}.rdy ${rqueue}/"${msgid}"/${cmd}.req
             error "${cmd} failed"
         fi
@@ -123,7 +138,7 @@ ack)
         deliver ${inbox} ${queue}/"${msgid}"/message.ack
 
         mv ${queue}/"${msgid}"/${cmd}.req  ${queue}/"${msgid}"/${cmd}.ok
-        rm ${queue}/"${msgid}"/message.enc ${queue}/"${msgid}"/peereph.sig \
+        rm ${queue}/"${msgid}"/message.enc ${queue}/"${msgid}"/speer.sig \
            ${queue}/"${msgid}"/send.mac    ${queue}/"${msgid}"/recv.mac
     else
         error "${cmd}.req (without ${cmd}.ok) not found"

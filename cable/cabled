@@ -5,21 +5,20 @@
 . "${0%"${0##*/}"}"suprofile
 
 
-# Preliminary variables
-rqueue=${CABLE_QUEUES}/rqueue
-msgidre='[0-9a-f]{40}'
-
-
-# Initialization tasks
-if [ "$1" = init ]; then
-    find ${rqueue} -mindepth 1 -regextype posix-egrep \
-                   -regex "${rqueue}/${msgidre}\.new(/.*)?" -delete
-    exit
-fi
-
-
 # Variables
 daemon="${CABLE_HOME}"daemon
+queue=${CABLE_QUEUES}/queue
+rqueue=${CABLE_QUEUES}/rqueue
+
+mktempre='tmp\.[A-Za-z0-9]{10}'
+newmsgidre='[0-9a-f]{40}\.new'
+
+
+# Remove stale temporary directories with old timestamps
+find ${queue}  -mindepth 1 -maxdepth 1 -regextype posix-egrep \
+    -regex "${queue}/${mktempre}"    -mtime +1 -exec rm -rf {} \;
+find ${rqueue} -mindepth 1 -maxdepth 1 -regextype posix-egrep \
+    -regex "${rqueue}/${newmsgidre}" -mtime +1 -exec rm -rf {} \;
 
 
 # Let fuse-vfs inotify emulation stabilize

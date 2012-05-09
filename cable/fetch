@@ -41,16 +41,41 @@ check_userhost() {
 }
 
 
+# Retry curl request for 400+ status codes
+retrycurl() {
+    local status= delay=
+
+    for delay in 0 5 10 15; do
+        sleep ${delay}
+        status=0; curl "$@" || status=$?
+
+        if [ ${status} != 22 ]; then
+            break
+        fi
+    done
+
+    return ${status}
+}
+
+
 case "${cmd}" in
 send)
     # <send> [fetch loop]
     if [ -e ${queue}/"${msgid}"/${cmd}.req ]; then
         prefix=`urlprefix ${queue}`
 
+        susername=`cat ${queue}/"${msgid}"/susername | tr -cd '[:alnum:].-' | tr '[:upper:]' '[:lower:]'`
+        shostname=`cat ${queue}/"${msgid}"/shostname | tr -cd '[:alnum:].-' | tr '[:upper:]' '[:lower:]'`
+        check_userhost "${susername}" "${shostname}"
+
+        curl -sSfg "${prefix}"/request/msg/"${msgid}"/"${shostname}"/"${susername}"
+
+        # TODO: with precomputed rpeers, a delay will be much less likely
+        retrycurl -sSfg -o ${queue}/"${msgid}"/rpeer.sig "${prefix}"/rqueue/"${msgid}".key
+
         # A multi-URI curl command doesn't fail on a bad early fetch
         curl -sSfg -o ${queue}/"${msgid}"/ca.pem     "${prefix}"/certs/ca.pem
         curl -sSfg -o ${queue}/"${msgid}"/verify.pem "${prefix}"/certs/verify.pem
-        curl -sSfg -o ${queue}/"${msgid}"/peer.sig   "${prefix}"/certs/peer.sig
 
         mv ${queue}/"${msgid}"/${cmd}.req ${queue}/"${msgid}"/${cmd}.rdy
     else
@@ -60,18 +85,19 @@ send)
 
 recv)
     # <recv> [fetch loop]
-    if [ -e ${rqueue}/"${msgid}"/${cmd}.req ]; then
+    if [ -e ${rqueue}/"${msgid}"/${cmd}.req  -a  -e ${rqueue}/"${msgid}"/send.mac  -a \
+         ! -e ${rqueue}/"${msgid}"/${cmd}.rdy  -a  ! -e ${rqueue}/"${msgid}"/${cmd}.ok ]; then
         prefix=`urlprefix ${rqueue}`
 
         # A multi-URI curl command deosn't fail on a bad early fetch
         curl -sSfg -o ${rqueue}/"${msgid}"/message.enc "${prefix}"/queue/"${msgid}"
-        curl -sSfg -o ${rqueue}/"${msgid}"/peereph.sig "${prefix}"/queue/"${msgid}".key
+        curl -sSfg -o ${rqueue}/"${msgid}"/speer.sig   "${prefix}"/queue/"${msgid}".key
         curl -sSfg -o ${rqueue}/"${msgid}"/ca.pem      "${prefix}"/certs/ca.pem
         curl -sSfg -o ${rqueue}/"${msgid}"/verify.pem  "${prefix}"/certs/verify.pem
 
         mv ${rqueue}/"${msgid}"/${cmd}.req ${rqueue}/"${msgid}"/${cmd}.rdy
     else
-        error "${cmd}.req not found"
+        error "${cmd}.req (without .rdy/.ok) or send.mac not found"
     fi
     ;;
 

@@ -1,0 +1,34 @@
+#!/bin/sh -e
+
+# Testing mockup script for logger
+
+# parse supported logger arguments
+args=`getopt -o t:p: -- "$@"`
+eval set -- "${args}"
+tag=logger
+pri=unspec
+
+while :; do
+    case "$1" in
+        -t)
+            tag="$2"
+            shift 2
+            ;;
+
+        -p)
+            pri="$2"
+            shift 2
+            ;;
+
+        --)
+            shift
+            break
+            ;;
+
+        *)
+            shift
+            ;;
+    esac
+done
+
+echo "[${pri}] ${tag}: $@" 1>&2

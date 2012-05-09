@@ -14,17 +14,19 @@
 #include <sys/stat.h>
 
 
-#define VERSION             "LIBERTE CABLE 2.0"
+#define VERSION             "LIBERTE CABLE 3.0"
 #define REQVAR              "PATH_INFO"
 #define MAX_REQ_LENGTH      512
 
 /* caller shouldn't be able to differentiate OK/ERROR */
-#define OK                  "OK"
+#define OK                  VERSION
 #define BADREQ              "BADREQ"
 #define BADFMT              "BADFMT"
 #define BADCFG              "BADCFG"
-#ifndef ERROR
+#ifndef TESTING
 #define ERROR               OK
+#else
+#define ERROR               "ERROR"
 #endif
 
 #define MSGID_LENGTH         40
@@ -144,12 +146,12 @@ static void read_line(const char *path, char *s, int sz) {
 
 
 static void check_file(const char *path) {
-    if(access(path, F_OK))
+    if (access(path, F_OK))
         retstatus(ERROR);
 }
 
 
-static void handle_msg(const char *msgid, const char *mac, const char *hostname,
+static void handle_msg(const char *msgid, const char *hostname,
                        const char *username, const char *cqueues) {
     char path[MAX_PATH_LENGTH+1], npath[MAX_PATH_LENGTH+4+1];
     int  baselen;
@@ -161,7 +163,7 @@ static void handle_msg(const char *msgid, const char *mac, const char *hostname,
 
     /* checkno /cables/rqueue/<msgid> */
     if (!access(path, F_OK))
-        retstatus(ERROR);
+        return;
 
     /* temp base: .../cables/rqueue/<msgid>.new */
     strcpy(npath, path);
@@ -180,17 +182,48 @@ static void handle_msg(const char *msgid, const char *mac, const char *hostname,
     strcpy(npath + baselen, "/username");
     write_line(npath, username);
 
-    /* write send.mac */
-    strcpy(npath + baselen, "/send.mac");
-    write_line(npath, mac);
-
-    /* create recv.req */
-    strcpy(npath + baselen, "/recv.req");
+    /* create peer.req */
+    strcpy(npath + baselen, "/peer.req");
     create_file(npath);
 
     /* rename .../cables/rqueue/<msgid>.new -> <msgid> */
     npath[baselen] = '\0';
     if (rename(npath, path))
+        retstatus(ERROR);
+}
+
+
+static void handle_snd(const char *msgid, const char *mac, const char *cqueues) {
+    char path[MAX_PATH_LENGTH+1], npath[MAX_PATH_LENGTH+1];
+    int  baselen;
+
+    /* base: .../cables/rqueue/<msgid> */
+    strcpy(path, cqueues);
+    strcat(path, RQUEUE_SUFFIX);
+    strcat(path, msgid);
+    baselen = strlen(path);
+
+    /* check peer.ok */
+    strcpy(path + baselen, "/peer.ok");
+    check_file(path);
+
+    /* write send.mac (skip if exists) */
+    strcpy(path + baselen, "/send.mac");
+    if (access(path, F_OK))
+        write_line(path, mac);
+
+    /* create recv.req (atomic) */
+    strcpy(npath, path);
+    strcpy(path  + baselen, "/peer.ok");
+    strcpy(npath + baselen, "/recv.req");
+    if (! link(path, npath)) {
+        /* touch /cables/rqueue/<msgid>/ (if recv.req didn't exist) */
+        path[baselen] = '\0';
+
+        if (utime(path, NULL))
+            retstatus(ERROR);
+    }
+    else if (errno != EEXIST)
         retstatus(ERROR);
 }
 
@@ -270,7 +303,7 @@ static void handle_ack(const char *msgid, const char *mac, const char *cqueues) 
 int main() {
     char       buf[MAX_REQ_LENGTH+1], cqueues[MAX_PATH_PREFIX+1];
     const char *pathinfo, *delim = "/", *cqenv;
-    char       *cmd, *msgid, *mac, *arg1, *arg2;
+    char       *cmd, *msgid, *arg1, *arg2;
 
     umask(0077);
     setlocale(LC_ALL, "C");
@@ -295,7 +328,6 @@ int main() {
     /* Tokenize the request */
     cmd   = strtok(buf,  delim);
     msgid = strtok(NULL, delim);
-    mac   = strtok(NULL, delim);
     arg1  = strtok(NULL, delim);
     arg2  = strtok(NULL, delim);
 
@@ -315,7 +347,8 @@ int main() {
     /* Handle commands
 
        ver
-       msg/<msgid>/<mac>/<hostname>/<username>
+       msg/<msgid>/<hostname>/<username>
+       snd/<msgid>/<mac>
        rcp/<msgid>/<mac>
        ack/<msgid>/<mac>
 
@@ -336,32 +369,41 @@ int main() {
             retstatus(BADFMT);
 
         if (   !vfyhex(MSGID_LENGTH, msgid)
-            || !vfyhex(MAC_LENGTH, mac)
             || !vfyhost(arg1)
             || !vfybase32(USERNAME_LENGTH, arg2))
             retstatus(BADFMT);
 
-        handle_msg(msgid, mac, arg1, arg2, cqueues);
+        handle_msg(msgid, arg1, arg2, cqueues);
+    }
+    else if (!strcmp("snd", cmd)) {
+        if (!arg1 || arg2)
+            retstatus(BADFMT);
+
+        if (   !vfyhex(MSGID_LENGTH, msgid)
+            || !vfyhex(MAC_LENGTH, arg1))
+            retstatus(BADFMT);
+
+        handle_snd(msgid, arg1, cqueues);
     }
     else if (!strcmp("rcp", cmd)) {
-        if (!mac || arg1)
+        if (!arg1 || arg2)
             retstatus(BADFMT);
 
         if (   !vfyhex(MSGID_LENGTH, msgid)
-            || !vfyhex(MAC_LENGTH, mac))
+            || !vfyhex(MAC_LENGTH, arg1))
             retstatus(BADFMT);
 
-        handle_rcp(msgid, mac, cqueues);
+        handle_rcp(msgid, arg1, cqueues);
     }
     else if (!strcmp("ack", cmd)) {
-        if (!mac || arg1)
+        if (!arg1 || arg2)
             retstatus(BADFMT);
 
         if (   !vfyhex(MSGID_LENGTH, msgid)
-            || !vfyhex(MAC_LENGTH, mac))
+            || !vfyhex(MAC_LENGTH, arg1))
             retstatus(BADFMT);
 
-        handle_ack(msgid, mac, cqueues);
+        handle_ack(msgid, arg1, cqueues);
     }
     else
         retstatus(BADFMT);

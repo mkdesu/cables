@@ -46,7 +46,15 @@ static void flog(int priority, const char *format, ...) {
     va_list ap;
 
     va_start(ap, format);
+
+#ifndef TESTING
     vsyslog(priority, format, ap);
+#else
+    fprintf(stderr, "[%d] cable: ", priority);
+    vfprintf(stderr, format, ap);
+    fprintf(stderr, "\n");
+#endif
+
     va_end(ap);
 }
 
@@ -54,7 +62,15 @@ static void flogexit(int priority, const char *format, ...) {
     va_list ap;
 
     va_start(ap, format);
+
+#ifndef TESTING
     vsyslog(priority, format, ap);
+#else
+    fprintf(stderr, "[%d] cable: ", priority);
+    vfprintf(stderr, format, ap);
+    fprintf(stderr, "\n");
+#endif
+
     va_end(ap);
 
     exit(EXIT_FAILURE);
