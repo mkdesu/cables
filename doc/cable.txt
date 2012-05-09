@@ -223,7 +223,7 @@ Initialization (for <msgid>s of 40 hex digits):
 
 Watch list (for <msgid>s of 40 hex digits):
   + /cables/queue/  <msgid>, <msgid>.del              (inotify: moved_to, attrib)
-  + /cables/rqueue/ <msgid>, <msgid>.del              (inotify: moved_to)
+  + /cables/rqueue/ <msgid>, <msgid>.del              (inotify: moved_to, attrib)
 
   + <msgid>:     non-blocking lock attempt
   + <msgid>.del: blocking lock (to let renaming action complete, with timeout)

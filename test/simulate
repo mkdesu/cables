@@ -61,8 +61,10 @@ mkdir ${root}/mockup
 cp test/{curl,logger} ${root}/mockup
 
 
-sinfo "Reducing RSA strength"
+sinfo "Reducing RSA and DH strength"
 sed -i 's/^rsabits=.*/rsabits=1024/' ${root}/stage{1,2}/bin/gen-cable-username
+cp test/oakley-group-2.pem           ${root}/stage1/libexec/cable/rfc3526-modp-18.pem
+cp test/oakley-group-2.pem           ${root}/stage2/libexec/cable/rfc3526-modp-18.pem
 
 
 sinfo "Removing sudo invocations and i/o redirection"

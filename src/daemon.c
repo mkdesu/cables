@@ -203,7 +203,7 @@ static int reg_watches(const char *qpath, const char *rqpath) {
     }
 
     /* existing watch is ok */
-    if ((inotrqwd = inotify_add_watch(inotfd, rqpath,             IN_MOVED_TO | IN_MOVE_SELF | IN_DONT_FOLLOW | IN_ONLYDIR)) == -1) {
+    if ((inotrqwd = inotify_add_watch(inotfd, rqpath, IN_ATTRIB | IN_MOVED_TO | IN_MOVE_SELF | IN_DONT_FOLLOW | IN_ONLYDIR)) == -1) {
         warning();
         return 0;
     }
