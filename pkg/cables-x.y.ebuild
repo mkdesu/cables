@@ -1,4 +1,4 @@
-# Copyright 1999-2011 Gentoo Foundation
+# Copyright 1999-2012 Gentoo Foundation
 # Distributed under the terms of the GNU General Public License v2
 # $Header: $
 
@@ -54,9 +54,9 @@ src_install() {
 
 	doinitd  "${D}"/etc/cable/cabled
 	doconfd  "${D}"/etc/cable/spawn-fcgi.cable
-	dosym    spawn-fcgi /etc/init.d/spawn-fcgi.cable
-	fperms   600 "${D}"/etc/cable/nginx.conf
 	rm       "${D}"/etc/cable/{cabled,spawn-fcgi.cable} || die
+	dosym    spawn-fcgi /etc/init.d/spawn-fcgi.cable
+	fperms   600   /etc/cable/nginx.conf
 
 	# /srv/www(/cable)        drwx--x--x root  root
 	# /srv/www/cable/certs    d-wx--s--T root  nginx
