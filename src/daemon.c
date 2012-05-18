@@ -1,5 +1,5 @@
 /*
-  The following environment variables are used (from suprofile):
+  The following environment variables are used (from /etc/cable/profile):
   CABLE_HOME, CABLE_MOUNT, CABLE_QUEUES
  */
 
@@ -37,10 +37,6 @@
 #include <sys/inotify.h>
 #include <sys/wait.h>
 #include <sys/select.h>
-
-#ifndef CLOCK_MONOTONIC_RAW
-#define CLOCK_MONOTONIC_RAW 4
-#endif
 
 
 #define MSGID_LENGTH 40
@@ -533,9 +529,9 @@ int main() {
     qpath[MAXPATH-sizeof(RQUEUE_NAME)]    = '\0';
     strcat(rqpath,   "/" RQUEUE_NAME);
 
-    strncpy(looppath, homeenv, MAXPATH-sizeof(LOOP_NAME)+1);
-    looppath[MAXPATH-sizeof(LOOP_NAME)+1] = '\0';
-    strcat(looppath, LOOP_NAME);
+    strncpy(looppath, homeenv, MAXPATH-sizeof(LOOP_NAME));
+    looppath[MAXPATH-sizeof(LOOP_NAME)] = '\0';
+    strcat(looppath, "/" LOOP_NAME);
 
 
     /* try to reregister watches as long as no signal caught */

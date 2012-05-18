@@ -7,8 +7,8 @@ fi
 
 
 # Helpers
-cms="${CABLE_HOME}"cms
-mhdrop="${CABLE_HOME}"mhdrop
+cms=${CABLE_HOME}/cms
+mhdrop=${CABLE_HOME}/mhdrop
 
 
 # Directories

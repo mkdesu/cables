@@ -1,0 +1,7 @@
+#!/sbin/runscript
+
+description="Cables communication daemon"
+
+command=/usr/libexec/cable/cabled
+start_stop_daemon_args="-bm -u cable"
+pidfile=/var/run/cabled.pid

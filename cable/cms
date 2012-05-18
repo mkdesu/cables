@@ -11,8 +11,8 @@ cmd="$1"
 ssldir="$2"
 msgdir="$3"
 
-base32="${CABLE_HOME}"hex2base32
-modp18="${CABLE_HOME}"rfc3526-modp-18.pem
+modp18=${CABLE_CONF}/rfc3526-modp-18.pem
+base32=${CABLE_HOME}/hex2base32
 
 sigalg=sha512
 encalg=aes256

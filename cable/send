@@ -1,7 +1,7 @@
 #!/bin/sh -e
 
 # Setup environment with needed environment vars
-. "${0%"${0##*/}"}"suprofile
+. /etc/cable/profile
 
 
 # Creates ${queuedir}/<msgid>{username,hostname,message,send.req}

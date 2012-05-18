@@ -2,11 +2,11 @@
 
 # Setup restricted environment
 # (rely on init via sudo to set up TMPDIR)
-. "${0%"${0##*/}"}"suprofile
+. /etc/cable/profile
 
 
 # Variables
-daemon="${CABLE_HOME}"daemon
+daemon=${CABLE_HOME}/daemon
 queue=${CABLE_QUEUES}/queue
 rqueue=${CABLE_QUEUES}/rqueue
 
@@ -26,5 +26,4 @@ sleep 30
 
 
 # Launch the inotify-based daemon
-exec 0<&- 1>/dev/null 2>&1
 exec "${daemon}"

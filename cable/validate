@@ -7,7 +7,7 @@ fi
 
 
 # Helpers
-mhdrop="${CABLE_HOME}"mhdrop
+mhdrop=${CABLE_HOME}/mhdrop
 
 
 # Parameters

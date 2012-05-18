@@ -1,15 +1,14 @@
 #!/bin/sh -e
 
 # This command can be run via "sudo -u anon"
-CABLE_HOME=/usr/libexec/cable/
-. ${CABLE_HOME}suprofile
+. /etc/cable/profile
 
 
 # https://gitweb.torproject.org/tor.git/blob/HEAD:/doc/spec/tor-spec.txt
 # https://trac.torproject.org/projects/tor/wiki/TheOnionRouter/HiddenServiceNames
 
 tordir=${CABLE_TOR}/hidden_service
-base32="${CABLE_HOME}"hex2base32
+base32=${CABLE_HOME}/hex2base32
 
 tordirtmp=${tordir}.tmp
 

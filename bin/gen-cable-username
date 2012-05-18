@@ -1,15 +1,14 @@
 #!/bin/sh -e
 
 # This command can be run via "sudo -u anon"
-CABLE_HOME=/usr/libexec/cable/
-. ${CABLE_HOME}suprofile
+. /etc/cable/profile
 
 
 # NOTE: PSS signatures support in certificates
 # (but not in CMS) is available in OpenSSL 1.0.1
 
-base32="${CABLE_HOME}"hex2base32
-sslconf="${CABLE_HOME}"extensions.cnf
+sslconf=${CABLE_CONF}/extensions.cnf
+base32=${CABLE_HOME}/hex2base32
 
 certdir=${CABLE_CERTS}/certs
 keysdir=${CABLE_CERTS}/private

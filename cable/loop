@@ -13,10 +13,10 @@ fi
 
 
 # Helpers
-validate="${CABLE_HOME}"validate
-fetch="${CABLE_HOME}"fetch
-crypto="${CABLE_HOME}"crypto
-comm="${CABLE_HOME}"comm
+validate=${CABLE_HOME}/validate
+fetch=${CABLE_HOME}/fetch
+crypto=${CABLE_HOME}/crypto
+comm=${CABLE_HOME}/comm
 
 # Parameters
 qtype=$1

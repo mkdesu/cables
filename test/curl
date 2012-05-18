@@ -80,7 +80,7 @@ fi
 
 
 # set "server" environment
-. ${stagebase}/libexec/cable/suprofile
+. ${stagebase}/etc/cable/profile
 
 if [ ! -e "${CABLE_PUB}/${urluser}" ]; then
     error "www basedir not found"
