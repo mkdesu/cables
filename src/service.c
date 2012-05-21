@@ -1,6 +1,11 @@
 /*
-  Returned status: OK, BADREQ, BADFMT, <VERSION>
+  Returned status: OK, BADREQ, BADFMT, BADCFG, <VERSION>
  */
+
+/* Alternative: _POSIX_C_SOURCE 200809L */
+#ifndef _XOPEN_SOURCE
+#define _XOPEN_SOURCE 700
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,7 +14,7 @@
 #include <ctype.h>
 #include <unistd.h>
 #include <errno.h>
-#include <utime.h>
+#include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 
@@ -35,16 +40,19 @@
 #define USERNAME_LENGTH      32
 #define MAC_LENGTH          128
 
-/* maximum filename length in (r)q_pfx/<msgid>/: 32 characters */
-#define MAX_PATH_PREFIX     127
-#define MAX_PATH_LENGTH     (MAX_PATH_PREFIX + sizeof(RQUEUE_SUFFIX)-1 + MSGID_LENGTH+1 + 32)
+#define DCREAT_MODE         (S_IRWXU | S_IRWXG | S_IRWXO)
+#define FCREAT_MODE         (S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH)
 
 #define CABLE_QUEUES        "CABLE_QUEUES"
-#define QUEUE_SUFFIX        "/queue/"
-#define RQUEUE_SUFFIX       "/rqueue/"
+#define QUEUE_SUBDIR        "queue"
+#define RQUEUE_SUBDIR       "rqueue"
 
 
 static void retstatus(const char *status) {
+#ifdef TESTING
+    if (!strcmp(status, ERROR) && errno)
+        perror("Error");
+#endif
     puts(status);
     exit(0);
 }
@@ -99,11 +107,17 @@ static int vfyhost(char *s) {
 }
 
 
-static void write_line(const char *path, const char *s) {
+static void write_line(int dir, const char *path, const char *s) {
+    int  fd;
     FILE *file;
 
-    if (!(file = fopen(path, "w")))
+    if ((fd = openat(dir, path, O_CREAT | O_WRONLY | O_TRUNC, FCREAT_MODE)) == -1)
         retstatus(ERROR);
+
+    if (!(file = fdopen(fd, "w"))) {
+        close(fd);
+        retstatus(ERROR);
+    }
 
     if (s) {
         if(fputs(s, file) < 0 || fputc('\n', file) != '\n') {
@@ -117,23 +131,25 @@ static void write_line(const char *path, const char *s) {
 }
 
 
-static void create_file(const char *path) {
-    if (access(path, F_OK))
-        write_line(path, NULL);
+static void create_file(int dir, const char *path) {
+    if (faccessat(dir, path, F_OK, 0))
+        write_line(dir, path, NULL);
 }
 
 
-static void read_line(const char *path, char *s, int sz) {
+static void read_line(int dir, const char *path, char *s, int sz) {
+    int  fd;
     FILE *file;
 
-    if (!(file = fopen(path, "r")))
+    if ((fd = openat(dir, path, O_RDONLY)) == -1)
+        retstatus(ERROR);
+
+    if (!(file = fdopen(fd, "r")))
         retstatus(ERROR);
 
     if (s) {
-        if(!fgets(s, sz, file) || fgetc(file) != EOF) {
-            fclose(file);
+        if(!fgets(s, sz, file) || fgetc(file) != EOF)
             retstatus(ERROR);
-        }
 
         sz = strlen(s);
         if (s[sz-1] == '\n')
@@ -145,165 +161,169 @@ static void read_line(const char *path, char *s, int sz) {
 }
 
 
-static void check_file(const char *path) {
-    if (access(path, F_OK))
+static void check_file(int dir, const char *path) {
+    if (faccessat(dir, path, F_OK, 0))
         retstatus(ERROR);
 }
 
 
 static void handle_msg(const char *msgid, const char *hostname,
-                       const char *username, const char *cqueues) {
-    char path[MAX_PATH_LENGTH+1], npath[MAX_PATH_LENGTH+4+1];
-    int  baselen;
+                       const char *username, int cqdir) {
+    char msgidnew[MSGID_LENGTH+4+1];
+    int  msgdir;
 
-    /* base: .../cables/rqueue/<msgid> */
-    strcpy(path, cqueues);
-    strcat(path, RQUEUE_SUFFIX);
-    strcat(path, msgid);
-
-    /* checkno /cables/rqueue/<msgid> */
-    if (!access(path, F_OK))
+    /* checkno /cables/rqueue/<msgid> (ok and skip if exists) */
+    if (!faccessat(cqdir, msgid, F_OK, 0))
         return;
 
     /* temp base: .../cables/rqueue/<msgid>.new */
-    strcpy(npath, path);
-    strcat(npath, ".new");
-    baselen = strlen(npath);
+    strncpy(msgidnew, msgid, MSGID_LENGTH);
+    strcpy(msgidnew + MSGID_LENGTH, ".new");
 
     /* create directory (ok if exists) */
-    if (mkdir(npath, 0700) && errno != EEXIST)
+    if (mkdirat(cqdir, msgidnew, DCREAT_MODE) && errno != EEXIST)
+        retstatus(ERROR);
+
+    if ((msgdir = openat(cqdir, msgidnew, O_RDONLY)) == -1)
         retstatus(ERROR);
 
     /* write hostname */
-    strcpy(npath + baselen, "/hostname");
-    write_line(npath, hostname);
+    write_line(msgdir, "hostname", hostname);
 
     /* write username */
-    strcpy(npath + baselen, "/username");
-    write_line(npath, username);
+    write_line(msgdir, "username", username);
 
     /* create peer.req */
-    strcpy(npath + baselen, "/peer.req");
-    create_file(npath);
+    create_file(msgdir, "peer.req");
 
     /* rename .../cables/rqueue/<msgid>.new -> <msgid> */
-    npath[baselen] = '\0';
-    if (rename(npath, path))
+    if (close(msgdir))
+        retstatus(ERROR);
+
+    if (renameat(cqdir, msgidnew, cqdir, msgid))
         retstatus(ERROR);
 }
 
 
-static void handle_snd(const char *msgid, const char *mac, const char *cqueues) {
-    char path[MAX_PATH_LENGTH+1], npath[MAX_PATH_LENGTH+1];
-    int  baselen;
+static void handle_snd(const char *msgid, const char *mac, int cqdir) {
+    int  msgdir;
 
     /* base: .../cables/rqueue/<msgid> */
-    strcpy(path, cqueues);
-    strcat(path, RQUEUE_SUFFIX);
-    strcat(path, msgid);
-    baselen = strlen(path);
+    if ((msgdir = openat(cqdir, msgid, O_RDONLY)) == -1)
+        retstatus(ERROR);
 
     /* check peer.ok */
-    strcpy(path + baselen, "/peer.ok");
-    check_file(path);
+    check_file(msgdir, "peer.ok");
 
     /* write send.mac (skip if exists) */
-    strcpy(path + baselen, "/send.mac");
-    if (access(path, F_OK))
-        write_line(path, mac);
+    if (faccessat(msgdir, "send.mac", F_OK, 0))
+        write_line(msgdir, "send.mac", mac);
 
-    /* create recv.req (atomic) */
-    strcpy(npath, path);
-    strcpy(path  + baselen, "/peer.ok");
-    strcpy(npath + baselen, "/recv.req");
-    if (! link(path, npath)) {
+    /* create recv.req (atomic, ok if exists) */
+    if (! linkat(msgdir, "peer.ok", msgdir, "recv.req", 0)) {
         /* touch /cables/rqueue/<msgid>/ (if recv.req didn't exist) */
-        path[baselen] = '\0';
-
-        if (utime(path, NULL))
+        /* euid owns msgdir, so O_RDWR is not needed */
+        if (futimens(msgdir, NULL))
             retstatus(ERROR);
     }
     else if (errno != EEXIST)
         retstatus(ERROR);
+
+    if (close(msgdir))
+        retstatus(ERROR);
 }
 
 
-static void handle_rcp(const char *msgid, const char *mac, const char *cqueues) {
-    char path[MAX_PATH_LENGTH+1], npath[MAX_PATH_LENGTH+1];
+static void handle_rcp(const char *msgid, const char *mac, int cqdir) {
     char exmac[MAC_LENGTH+2];
-    int  baselen;
+    int  msgdir;
 
     /* base: .../cables/queue/<msgid> */
-    strcpy(path, cqueues);
-    strcat(path, QUEUE_SUFFIX);
-    strcat(path, msgid);
-    baselen = strlen(path);
+    if ((msgdir = openat(cqdir, msgid, O_RDONLY)) == -1)
+        retstatus(ERROR);
 
     /* check send.ok */
-    strcpy(path + baselen, "/send.ok");
-    check_file(path);
+    check_file(msgdir, "send.ok");
 
     /* read recv.mac */
-    strcpy(path + baselen, "/recv.mac");
-    read_line(path, exmac, sizeof(exmac));
+    read_line(msgdir, "recv.mac", exmac, sizeof(exmac));
 
     /* compare <recvmac> <-> recv.mac */
     if (strcmp(mac, exmac))
         retstatus(ERROR);
 
-    /* create ack.req (atomic) */
-    strcpy(npath, path);
-    strcpy(path  + baselen, "/send.ok");
-    strcpy(npath + baselen, "/ack.req");
-    if (! link(path, npath)) {
+    /* create ack.req (atomic, ok if exists) */
+    if (! linkat(msgdir, "send.ok", msgdir, "ack.req", 0)) {
         /* touch /cables/queue/<msgid>/ (if ack.req didn't exist) */
-        path[baselen] = '\0';
-
-        if (utime(path, NULL))
+        /* euid owns msgdir, so O_RDWR is not needed */
+        if (futimens(msgdir, NULL))
             retstatus(ERROR);
     }
     else if (errno != EEXIST)
         retstatus(ERROR);
+
+    if (close(msgdir))
+        retstatus(ERROR);
 }
 
 
-static void handle_ack(const char *msgid, const char *mac, const char *cqueues) {
-    char path[MAX_PATH_LENGTH+1], trpath[MAX_PATH_LENGTH+4+1];
-    char exmac[MAC_LENGTH+2];
-    int  baselen;
+static void handle_ack(const char *msgid, const char *mac, int cqdir) {
+    char msgiddel[MSGID_LENGTH+4+1], exmac[MAC_LENGTH+2];
+    int  msgdir;
 
     /* base: .../cables/rqueue/<msgid> */
-    strcpy(path, cqueues);
-    strcat(path, RQUEUE_SUFFIX);
-    strcat(path, msgid);
-    baselen = strlen(path);
+    if ((msgdir = openat(cqdir, msgid, O_RDONLY)) == -1)
+        retstatus(ERROR);
 
     /* check recv.ok */
-    strcpy(path + baselen, "/recv.ok");
-    check_file(path);
+    check_file(msgdir, "recv.ok");
 
     /* read ack.mac */
-    strcpy(path + baselen, "/ack.mac");
-    read_line(path, exmac, sizeof(exmac));
+    read_line(msgdir, "ack.mac", exmac, sizeof(exmac));
 
     /* compare <ackmac> <-> ack.mac */
     if (strcmp(mac, exmac))
         retstatus(ERROR);
 
     /* rename .../cables/rqueue/<msgid> -> <msgid>.del */
-    path[baselen] = '\0';
-    strcpy(trpath, path);
-    strcat(trpath, ".del");
+    strncpy(msgiddel, msgid, MSGID_LENGTH);
+    strcpy(msgiddel + MSGID_LENGTH, ".del");
 
-    if (rename(path, trpath))
+    if (close(msgdir))
+        retstatus(ERROR);
+
+    if (renameat(cqdir, msgid, cqdir, msgiddel))
         retstatus(ERROR);
 }
 
 
+int open_cqdir(const char *subdir) {
+    const char *cqenv;
+    int        cqdir, subcqdir;
+
+    /* Get queues prefix from environment */
+    if (!(cqenv = getenv(CABLE_QUEUES)))
+        retstatus(BADCFG);
+
+    if ((cqdir = open(cqenv, O_RDONLY)) == -1)
+        retstatus(ERROR);
+    cqenv = NULL;
+
+    if ((subcqdir = openat(cqdir, subdir, O_RDONLY)) == -1)
+        retstatus(ERROR);
+
+    if (close(cqdir))
+        retstatus(ERROR);
+
+    return subcqdir;
+}
+
+
 int main() {
-    char       buf[MAX_REQ_LENGTH+1], cqueues[MAX_PATH_PREFIX+1];
-    const char *pathinfo, *delim = "/", *cqenv;
+    char       buf[MAX_REQ_LENGTH+1];
+    const char *pathinfo, *delim = "/";
     char       *cmd, *msgid, *arg1, *arg2;
+    int        cqdir = -1;
 
     umask(0077);
     setlocale(LC_ALL, "C");
@@ -319,10 +339,9 @@ int main() {
     if (!pathinfo || strlen(pathinfo) >= sizeof(buf))
         retstatus(BADREQ);
 
-
     /* Copy request to writeable buffer */
-    strncpy(buf, pathinfo, sizeof(buf)-1);
-    buf[sizeof(buf)-1] = '\0';
+    strcpy(buf, pathinfo);
+    pathinfo = NULL;
 
 
     /* Tokenize the request */
@@ -333,15 +352,6 @@ int main() {
 
     if (strtok(NULL, delim) || !cmd)
         retstatus(BADFMT);
-
-
-    /* Get queues prefix from environment */
-    cqenv = getenv(CABLE_QUEUES);
-    if (!cqenv || strlen(cqenv) >= sizeof(cqueues))
-        retstatus(BADCFG);
-
-    strncpy(cqueues, cqenv, sizeof(cqueues)-1);
-    cqueues[sizeof(cqueues)-1] = '\0';
 
 
     /* Handle commands
@@ -373,7 +383,8 @@ int main() {
             || !vfybase32(USERNAME_LENGTH, arg2))
             retstatus(BADFMT);
 
-        handle_msg(msgid, arg1, arg2, cqueues);
+        cqdir = open_cqdir(RQUEUE_SUBDIR);
+        handle_msg(msgid, arg1, arg2, cqdir);
     }
     else if (!strcmp("snd", cmd)) {
         if (!arg1 || arg2)
@@ -383,7 +394,8 @@ int main() {
             || !vfyhex(MAC_LENGTH, arg1))
             retstatus(BADFMT);
 
-        handle_snd(msgid, arg1, cqueues);
+        cqdir = open_cqdir(RQUEUE_SUBDIR);
+        handle_snd(msgid, arg1, cqdir);
     }
     else if (!strcmp("rcp", cmd)) {
         if (!arg1 || arg2)
@@ -393,7 +405,8 @@ int main() {
             || !vfyhex(MAC_LENGTH, arg1))
             retstatus(BADFMT);
 
-        handle_rcp(msgid, arg1, cqueues);
+        cqdir = open_cqdir(QUEUE_SUBDIR);
+        handle_rcp(msgid, arg1, cqdir);
     }
     else if (!strcmp("ack", cmd)) {
         if (!arg1 || arg2)
@@ -403,11 +416,15 @@ int main() {
             || !vfyhex(MAC_LENGTH, arg1))
             retstatus(BADFMT);
 
-        handle_ack(msgid, arg1, cqueues);
+        cqdir = open_cqdir(RQUEUE_SUBDIR);
+        handle_ack(msgid, arg1, cqdir);
     }
     else
         retstatus(BADFMT);
 
+
+    if (close(cqdir))
+        retstatus(ERROR);
 
     retstatus(OK);
     return 0;

@@ -4,6 +4,8 @@ sinfo() {
     echo -e "\033[1;33;41m$@\033[0m"
 }
 
+version="LIBERTE CABLE 3.0"
+
 scriptdir="${0%"${0##*/}"}"
 cd ${scriptdir:-./}..
 
@@ -93,6 +95,85 @@ mv ${root}/user1/www/{cable,`cat ${root}/user1/cable/certs/username`}
 mv ${root}/user2/www/{cable,`cat ${root}/user2/cable/certs/username`}
 
 
+sinfo "Testing CGI service"
+csexec() {
+    local req="$1"
+    CABLE_QUEUES=${root}/user1/queues PATH_INFO="${req}" ${root}/stage1/libexec/cable/service 2>&1 | sed '/^$\|:/d'
+}
+
+mid1=1111111111aaaaaaaaaa9999999999ffffffffff
+mid2=0000000000bbbbbbbbbb7777777777eeeeeeeeee
+host1=o7te4msv3iexije6.onion
+host2=rorhxd3mqkngsj4m4y53jv42tfp2fd4bl4w7jbdeitnxw65wweaa.b32.i2p
+user1=25ebhnuidr6sbporsuhm43tig6oj2moo
+mac1=13c3fc33754e4266df492a43f8aa72a82e2ef55eb0f20051da98c8c96dfd0cef576e895b9a61211a5ee1b3057999e56db1b6ff39d5502963c0266095e4c62612
+mac2=6a799bb1b80087cc23f5955551f2e56c08f69287f87fb59fdb21251d912b8d6be8791f7528f82fe7ab453f432b04ac9859d8524d01740810d87c1c6a19781e97
+
+[ "`csexec ${mac1}${mac1}${mac1}${mac1}/`" = BADREQ ]
+for req in "" \
+           msg/${mid1//f/F}/${host1}/${user1}  \
+           msg/${mid1}/${host1//3/1}/${user1}  \
+           msg/${mid1}/${host2//3/8}/${user1}  \
+           msg/${mid1}/${host2}/${user1//o/O}  \
+           msg/${mid1}/${host1}/${user1}/extra \
+           snd/${mid1//f/g}/${mac1}            \
+           rcp/${mid1}/${mac1//9/A}            \
+           ack/${mid1}/${mac1}0                \
+           snd/${mid1}/${mac1}/extra           \
+           ver/extra                           \
+           ${mac1}${mac1}${mac1}${mac1}
+    do  [ "`csexec ${req}`" = BADFMT ]
+done
+
+[ "`csexec msg/${mid1}/${host1}/${user1}`" = "${version}" ]
+[ -e ${root}/user1/queues/rqueue/${mid1}/peer.req ]
+
+[ "`csexec msg/${mid1}/${host1}/${user1}`" = "${version}" ]
+mv ${root}/user1/queues/rqueue/${mid1}{,.new}
+
+[ "`csexec msg/${mid1}/${host2}/${user1}`" = "${version}" ]
+[ "`cat ${root}/user1/queues/rqueue/${mid1}/hostname`" = ${host2} ]
+
+[ "`csexec snd/${mid1}/${mac1}`" = ERROR ]
+[ ! -e ${root}/user1/queues/rqueue/${mid1}/send.mac ]
+
+touch ${root}/user1/queues/rqueue/${mid1}/peer.ok
+[ "`csexec snd/${mid1}/${mac1}`" = "${version}" ]
+[ "`cat ${root}/user1/queues/rqueue/${mid1}/send.mac`" = ${mac1} ]
+[ ${root}/user1/queues/rqueue/${mid1}/recv.req -ef ${root}/user1/queues/rqueue/${mid1}/peer.ok  ]
+
+[ "`csexec snd/${mid1}/${mac2}`" = "${version}" ]
+[ "`cat ${root}/user1/queues/rqueue/${mid1}/send.mac`" = ${mac1} ]
+
+mkdir ${root}/user1/queues/queue/${mid2}
+echo ${mac1} > ${root}/user1/queues/queue/${mid2}/recv.mac
+[ "`csexec rcp/${mid2}/${mac1}`" = ERROR ]
+[ ! -e ${root}/user1/queues/queue/${mid2}/ack.req ]
+
+touch ${root}/user1/queues/queue/${mid2}/send.ok
+[ "`csexec rcp/${mid2}/${mac1}`" = "${version}" ]
+[ ${root}/user1/queues/queue/${mid2}/ack.req -ef ${root}/user1/queues/queue/${mid2}/send.ok ]
+
+rm ${root}/user1/queues/queue/${mid2}/ack.req
+[ "`csexec rcp/${mid2}/${mac2}`" = ERROR ]
+[ ! -e ${root}/user1/queues/queue/${mid2}/ack.req ]
+
+rm ${root}/user1/queues/rqueue/${mid1}/*
+echo ${mac1} > ${root}/user1/queues/rqueue/${mid1}/ack.mac
+[ "`csexec ack/${mid1}/${mac1}`" = ERROR ]
+[ -e ${root}/user1/queues/rqueue/${mid1} ]
+
+touch ${root}/user1/queues/rqueue/${mid1}/recv.ok
+[ "`csexec ack/${mid1}/${mac1}`" = "${version}" ]
+[ -e ${root}/user1/queues/rqueue/${mid1}.del ]
+
+mv -T ${root}/user1/queues/rqueue/${mid1}{.del,}
+[ "`csexec ack/${mid1}/${mac2}`" = ERROR ]
+[ -e ${root}/user1/queues/rqueue/${mid1} ]
+
+rm -r ${root}/user1/queues/rqueue/${mid1} ${root}/user1/queues/queue/${mid2}
+
+
 sinfo "Testing cable-id and cable-ping"
 for u in 1 2; do
     for tp in user tor i2p; do
@@ -103,7 +184,7 @@ done
 for u in 1 2; do
     for tp in tor i2p; do
         eval cpresp=\`${root}/stage1/bin/cable-ping \${u${u}user}@\${u${u}${tp}}\`
-        [ "${cpresp}" = "LIBERTE CABLE 3.0" ]
+        [ "${cpresp}" = "${version}" ]
     done
 done
 
