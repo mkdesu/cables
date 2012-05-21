@@ -35,6 +35,9 @@ export CABLE_PUB=/srv/www
 # Supported email-like IDs
 export CABLE_REGEX='[a-z2-7]{32}@([a-z2-7]{16}\.onion|[a-z2-7]{52}\.b32\.i2p)'
 
+# Message or receipt timeout in seconds (e.g., 7 days)
+export CABLE_TMOUT=$((7 * 24 * 60 * 60))
+
 
 # OpenSSL random seed
 export RANDFILE=${TMPDIR}/openssl.rnd

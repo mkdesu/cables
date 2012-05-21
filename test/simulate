@@ -284,7 +284,8 @@ ccsend 2 "Tor2 -> Tor2, Tor1 (expire)"       ${u2user}@${u2tor} ${u2user}@${u2to
 ccsend 2 "Tor1 -> Tor1, Tor2 (expire, fake)" ${u1user}@${u1tor} ${u1user}@${u1tor} ${u2user}@${u2tor}
 ccsend 1 "Tor2 -> Tor2, Tor1 (expire, fake)" ${u2user}@${u2tor} ${u2user}@${u2tor} ${u1user}@${u1tor}
 
-sed -i 's/^sectmout=.*/sectmout=17/' ${root}/stage{1,2}/libexec/cable/validate
+echo CABLE_TMOUT=17 >> ${root}/stage1/etc/cable/profile
+echo CABLE_TMOUT=17 >> ${root}/stage2/etc/cable/profile
 ccdaemon
 
 if ! grep -rq Failed ${root}/user{1,2}/inbox; then
