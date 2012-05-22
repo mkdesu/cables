@@ -41,9 +41,6 @@
 
 #define MSGID_LENGTH 40
 
-/* max correct path length */
-#define MAXPATH     127
-
 /* waiting strategy for inotify setup retries (e.g., after fs unmount) */
 #define WAIT_INIT     2
 #define WAIT_MULT   1.5
@@ -210,19 +207,23 @@ static int reg_watches(const char *qpath, const char *rqpath) {
 
 /* check whether given path is a mountpoint by comparing its and its parent's device IDs */
 static int is_mountpoint(const char *path) {
-    char pathp[MAXPATH+1];
+    int    fd, res;
     struct stat st, stp;
 
-    strncpy(pathp, path,  MAXPATH-3);
-    pathp[MAXPATH-3] = '\0';
-    strcat(pathp, "/..");
-
-    if (lstat(path, &st) == -1  ||  lstat(pathp, &stp) == -1
-        ||  !S_ISDIR(st.st_mode)  ||  !S_ISDIR(stp.st_mode))
+    if ((fd = open(path, O_RDONLY)) == -1)
         return 0;
 
-    /* explicitly handle root fs, as well */
-    return (st.st_dev != stp.st_dev) || (st.st_ino == stp.st_ino) ;
+    if (fstat(fd, &st) == -1  ||  fstatat(fd, "..", &stp, 0) == -1
+        ||  !S_ISDIR(st.st_mode)  ||  !S_ISDIR(stp.st_mode))
+        res = 0;
+    else
+        /* explicitly handle root fs, as well */
+        res = (st.st_dev != stp.st_dev) || (st.st_ino == stp.st_ino);
+
+    if (close(fd))
+        error();
+
+    return res;
 }
 
 
@@ -480,12 +481,34 @@ static void retry_dir(const char *qtype, const char *qpath, const char *looppath
 }
 
 
+/* allocate buffer for environment variable + suffix */
+char* alloc_env(const char *var, const char *suffix) {
+    const char *value;
+    char       *buf;
+    size_t     varlen;
+
+    value = getenv(var);
+    if (!value) {
+        flog(LOG_ERR, "environment variable %s is not set", var);
+        exit(EXIT_FAILURE);
+    }
+
+    varlen = strlen(value);
+    if (!(buf = (char*) malloc(varlen + strlen(suffix) + 1)))
+        error();
+
+    strncpy(buf, value, varlen);
+    strcpy(buf + varlen, suffix);
+
+    return buf;
+}
+
+
 int main() {
     /* using FILENAME_MAX prevents EINVAL on read() */
-    char  buf[sizeof(struct inotify_event) + FILENAME_MAX+1];
-    char  mppath[MAXPATH+1], qpath[MAXPATH+1], rqpath[MAXPATH+1], looppath[MAXPATH+1];
-    const char *mpenv, *qsenv, *homeenv;
-    int   sz, offset, rereg, evqok = 0;
+    char   buf[sizeof(struct inotify_event) + FILENAME_MAX+1];
+    char   *mppath, *qpath, *rqpath, *looppath;
+    int    sz, offset, rereg, evqok = 0;
     struct inotify_event *iev;
     double retrytmout, lastclock;
 
@@ -509,29 +532,10 @@ int main() {
 
 
     /* extract environment */
-    mpenv   = getenv(CABLE_MOUNT);
-    qsenv   = getenv(CABLE_QUEUES);
-    homeenv = getenv(CABLE_HOME);
-
-    if (!mpenv || !qsenv || !homeenv) {
-        fprintf(stderr, "environment variables not set\n");
-        return EXIT_FAILURE;
-    }
-
-    strncpy(mppath,   mpenv,   MAXPATH);
-    mppath[MAXPATH]                       = '\0';
-
-    strncpy(qpath,    qsenv,   MAXPATH-sizeof(QUEUE_NAME));
-    qpath[MAXPATH-sizeof(QUEUE_NAME)]     = '\0';
-    strcat(qpath,    "/" QUEUE_NAME);
-
-    strncpy(rqpath,   qsenv,   MAXPATH-sizeof(RQUEUE_NAME));
-    qpath[MAXPATH-sizeof(RQUEUE_NAME)]    = '\0';
-    strcat(rqpath,   "/" RQUEUE_NAME);
-
-    strncpy(looppath, homeenv, MAXPATH-sizeof(LOOP_NAME));
-    looppath[MAXPATH-sizeof(LOOP_NAME)] = '\0';
-    strcat(looppath, "/" LOOP_NAME);
+    mppath   = alloc_env(CABLE_MOUNT,  "");
+    qpath    = alloc_env(CABLE_QUEUES, "/" QUEUE_NAME);
+    rqpath   = alloc_env(CABLE_QUEUES, "/" RQUEUE_NAME);
+    looppath = alloc_env(CABLE_HOME,   "/" LOOP_NAME);
 
 
     /* try to reregister watches as long as no signal caught */
@@ -597,8 +601,15 @@ int main() {
     }
 
     unreg_watches();
-    flog(LOG_INFO, "exiting");
 
+
+    free(looppath);
+    free(rqpath);
+    free(qpath);
+    free(mppath);
+
+    flog(LOG_INFO, "exiting");
     closelog();
+
     return EXIT_SUCCESS;
 }
