@@ -1,6 +1,6 @@
 /*
   The following environment variables are used (from /etc/cable/profile):
-  CABLE_HOME, CABLE_MOUNT, CABLE_QUEUES
+  CABLE_HOME, CABLE_QUEUES
  */
 
 /* Alternative: _POSIX_C_SOURCE 200809L */
@@ -61,7 +61,6 @@
 #endif
 
 /* environment variables */
-#define CABLE_MOUNT  "CABLE_MOUNT"
 #define CABLE_QUEUES "CABLE_QUEUES"
 #define CABLE_HOME   "CABLE_HOME"
 
@@ -205,33 +204,11 @@ static int reg_watches(const char *qpath, const char *rqpath) {
 }
 
 
-/* check whether given path is a mountpoint by comparing its and its parent's device IDs */
-static int is_mountpoint(const char *path) {
-    int    fd, res;
-    struct stat st, stp;
-
-    if ((fd = open(path, O_RDONLY)) == -1)
-        return 0;
-
-    if (fstat(fd, &st) == -1  ||  fstatat(fd, "..", &stp, 0) == -1
-        ||  !S_ISDIR(st.st_mode)  ||  !S_ISDIR(stp.st_mode))
-        res = 0;
-    else
-        /* explicitly handle root fs, as well */
-        res = (st.st_dev != stp.st_dev) || (st.st_ino == stp.st_ino);
-
-    if (close(fd))
-        error();
-
-    return res;
-}
-
-
 /*
   try to register inotify watches, unregistering them if not compeltely successful
   hold an open fd during the attempt, to prevent unmount during the process
 */
-static int try_reg_watches(const char *mppath, const char *qpath, const char *rqpath) {
+static int try_reg_watches(const char *qpath, const char *rqpath) {
     int  mpfd = -1, ret = 0;
     struct stat st;
 
@@ -241,9 +218,6 @@ static int try_reg_watches(const char *mppath, const char *qpath, const char *rq
     /* try to quickly open a fd (expect read access on qpath) */
     if ((mpfd = open(qpath, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_NONBLOCK)) == -1)
         flog(LOG_NOTICE, "failed to pin %s, waiting...", qpath);
-
-    else if (! is_mountpoint(mppath))
-        flog(LOG_NOTICE, "%s is not a mount point, waiting...", mppath);
 
     else if (lstat(qpath, &st) == -1  ||  !S_ISDIR(st.st_mode))
         flog(LOG_NOTICE, "%s is not a directory, waiting...", qpath);
@@ -292,11 +266,11 @@ static void sleepsec(double sec) {
 
 
 /* retry registering inotify watches, using the retry strategy parameters */
-static void wait_reg_watches(const char *mppath, const char *qpath, const char *rqpath) {
+static void wait_reg_watches(const char *qpath, const char *rqpath) {
     double slp = WAIT_INIT;
     int    ok  = 0;
 
-    while (!stop  &&  !(ok = try_reg_watches(mppath, qpath, rqpath))) {
+    while (!stop  &&  !(ok = try_reg_watches(qpath, rqpath))) {
         sleepsec(slp);
 
         slp = (slp * WAIT_MULT);
@@ -507,7 +481,7 @@ char* alloc_env(const char *var, const char *suffix) {
 int main() {
     /* using FILENAME_MAX prevents EINVAL on read() */
     char   buf[sizeof(struct inotify_event) + FILENAME_MAX+1];
-    char   *mppath, *qpath, *rqpath, *looppath;
+    char   *qpath, *rqpath, *looppath;
     int    sz, offset, rereg, evqok = 0;
     struct inotify_event *iev;
     double retrytmout, lastclock;
@@ -532,7 +506,6 @@ int main() {
 
 
     /* extract environment */
-    mppath   = alloc_env(CABLE_MOUNT,  "");
     qpath    = alloc_env(CABLE_QUEUES, "/" QUEUE_NAME);
     rqpath   = alloc_env(CABLE_QUEUES, "/" RQUEUE_NAME);
     looppath = alloc_env(CABLE_HOME,   "/" LOOP_NAME);
@@ -541,7 +514,7 @@ int main() {
     /* try to reregister watches as long as no signal caught */
     lastclock = getmontime();
     while (!stop) {
-        wait_reg_watches(mppath, qpath, rqpath);
+        wait_reg_watches(qpath, rqpath);
 
         /* read events as long as no signal caught and no unmount / move_self / etc. events read */
         rereg = 0;
@@ -606,7 +579,6 @@ int main() {
     free(looppath);
     free(rqpath);
     free(qpath);
-    free(mppath);
 
     flog(LOG_INFO, "exiting");
     closelog();

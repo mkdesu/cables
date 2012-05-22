@@ -27,7 +27,6 @@ make -s PREFIX=${root}/stage1 install
 sinfo "Setting stage1 paths for user1"
 cat >> ${root}/stage1/etc/cable/profile <<EOF
 
-export CABLE_MOUNT=/
 export CABLE_CERTS=${root}/user1/cable
 export CABLE_TOR=${root}/user1/tor
 export CABLE_I2P=${root}/user1/i2p
@@ -46,7 +45,6 @@ make -s PREFIX=${root}/stage2 install
 sinfo "Setting stage2 paths for user2"
 cat >> ${root}/stage2/etc/cable/profile <<EOF
 
-export CABLE_MOUNT=/
 export CABLE_CERTS=${root}/user2/cable
 export CABLE_TOR=${root}/user2/tor
 export CABLE_I2P=${root}/user2/i2p

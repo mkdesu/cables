@@ -12,7 +12,7 @@ export CABLE_CONF=/etc/cable
 export CABLE_HOME=/usr/libexec/cable
 
 
-# Must be mountpoint or /
+# Optional common root (not used outside this script)
 export CABLE_MOUNT=/home/anon/persist
 
 # Certificates and private keys directories
