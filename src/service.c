@@ -299,23 +299,31 @@ static void handle_ack(const char *msgid, const char *mac, int cqdir) {
 
 int open_cqdir(const char *subdir) {
     const char *cqenv;
-    int        cqdir, subcqdir;
+    char       *buf;
+    size_t     varlen;
+    int        cqdir;
 
-    /* Get queues prefix from environment */
+    /* get queues prefix from environment */
     if (!(cqenv = getenv(CABLE_QUEUES)))
         retstatus(BADCFG);
 
-    if ((cqdir = open(cqenv, O_RDONLY)) == -1)
-        retstatus(ERROR);
-    cqenv = NULL;
-
-    if ((subcqdir = openat(cqdir, subdir, O_RDONLY)) == -1)
+    /* allocate buffer: cqenv + '/' + subdir + '\0' */
+    varlen = strlen(cqenv);
+    if (!(buf = (char*) malloc(varlen + strlen(subdir) + 2)))
         retstatus(ERROR);
 
-    if (close(cqdir))
+    /* fill buffer */
+    strncpy(buf, cqenv, varlen);
+    cqenv       = NULL;
+    buf[varlen] = '/';
+    strcpy(buf + varlen + 1, subdir);
+
+    /* get file descriptor */
+    if ((cqdir = open(buf, O_RDONLY)) == -1)
         retstatus(ERROR);
 
-    return subcqdir;
+    free(buf);
+    return cqdir;
 }
 
 
