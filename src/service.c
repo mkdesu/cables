@@ -17,6 +17,7 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/file.h>
 
 
 #define VERSION             "LIBERTE CABLE 3.0"
@@ -167,6 +168,22 @@ static void check_file(int dir, const char *path) {
 }
 
 
+/* attemts lock; closes fd is lock would block */
+static int try_lock(int fd) {
+    if (!flock(fd, LOCK_EX | LOCK_NB))
+        return 1;
+
+    if (errno == EWOULDBLOCK) {
+        if (close(fd))
+            retstatus(ERROR);
+    }
+    else
+        retstatus(ERROR);
+
+    return 0;
+}
+
+
 static void handle_msg(const char *msgid, const char *hostname,
                        const char *username, int cqdir) {
     char msgidnew[MSGID_LENGTH+4+1];
@@ -187,6 +204,10 @@ static void handle_msg(const char *msgid, const char *hostname,
     if ((msgdir = openat(cqdir, msgidnew, O_RDONLY)) == -1)
         retstatus(ERROR);
 
+    /* lock temp base (ok if locked) */
+    if (!try_lock(msgdir))
+        return;
+
     /* write hostname */
     write_line(msgdir, "hostname", hostname);
 
@@ -196,10 +217,11 @@ static void handle_msg(const char *msgid, const char *hostname,
     /* create peer.req */
     create_file(msgdir, "peer.req");
 
-    /* rename .../cables/rqueue/<msgid>.new -> <msgid> */
+    /* unlock and close temp base (rename triggers loop's lock) */
     if (close(msgdir))
         retstatus(ERROR);
 
+    /* rename .../cables/rqueue/<msgid>.new -> <msgid> */
     if (renameat(cqdir, msgidnew, cqdir, msgid))
         retstatus(ERROR);
 }
@@ -212,6 +234,10 @@ static void handle_snd(const char *msgid, const char *mac, int cqdir) {
     if ((msgdir = openat(cqdir, msgid, O_RDONLY)) == -1)
         retstatus(ERROR);
 
+    /* lock base (ok if locked) */
+    if (!try_lock(msgdir))
+        return;
+
     /* check peer.ok */
     check_file(msgdir, "peer.ok");
 
@@ -221,6 +247,10 @@ static void handle_snd(const char *msgid, const char *mac, int cqdir) {
 
     /* create recv.req (atomic, ok if exists) */
     if (! linkat(msgdir, "peer.ok", msgdir, "recv.req", 0)) {
+        /* unlock base (touch triggers loop's lock) */
+        if (flock(msgdir, LOCK_UN))
+            retstatus(ERROR);
+
         /* touch /cables/rqueue/<msgid>/ (if recv.req didn't exist) */
         /* euid owns msgdir, so O_RDWR is not needed */
         if (futimens(msgdir, NULL))
@@ -242,6 +272,10 @@ static void handle_rcp(const char *msgid, const char *mac, int cqdir) {
     if ((msgdir = openat(cqdir, msgid, O_RDONLY)) == -1)
         retstatus(ERROR);
 
+    /* lock base (ok if locked) */
+    if (!try_lock(msgdir))
+        return;
+
     /* check send.ok */
     check_file(msgdir, "send.ok");
 
@@ -254,6 +288,10 @@ static void handle_rcp(const char *msgid, const char *mac, int cqdir) {
 
     /* create ack.req (atomic, ok if exists) */
     if (! linkat(msgdir, "send.ok", msgdir, "ack.req", 0)) {
+        /* unlock base (touch triggers loop's lock) */
+        if (flock(msgdir, LOCK_UN))
+            retstatus(ERROR);
+
         /* touch /cables/queue/<msgid>/ (if ack.req didn't exist) */
         /* euid owns msgdir, so O_RDWR is not needed */
         if (futimens(msgdir, NULL))
@@ -281,6 +319,10 @@ static void handle_ack(const char *msgid, const char *mac, int cqdir) {
     /* read ack.mac */
     read_line(msgdir, "ack.mac", exmac, sizeof(exmac));
 
+    /* close base */
+    if (close(msgdir))
+        retstatus(ERROR);
+
     /* compare <ackmac> <-> ack.mac */
     if (strcmp(mac, exmac))
         retstatus(ERROR);
@@ -288,9 +330,6 @@ static void handle_ack(const char *msgid, const char *mac, int cqdir) {
     /* rename .../cables/rqueue/<msgid> -> <msgid>.del */
     strncpy(msgiddel, msgid, MSGID_LENGTH);
     strcpy(msgiddel + MSGID_LENGTH, ".del");
-
-    if (close(msgdir))
-        retstatus(ERROR);
 
     if (renameat(cqdir, msgid, cqdir, msgiddel))
         retstatus(ERROR);

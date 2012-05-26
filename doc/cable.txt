@@ -193,7 +193,7 @@ Protocol
   + read    /cables/queue/<msgid>/ack.mac          (128 hex digits)
   + request <hostname>/<username>/request/ack/<msgid>/<ackmac>  (wait for response)
   + rename  /cables/queue/<msgid>                  -> <msgid>.del
-  (if ack is lost due to MITM attack, recipient will keep requesting rcp/<msgid>/<recvmac>)
+  (if ack is not handled or lost due to MITM attack, recipient will keep requesting rcp/<msgid>/<recvmac>)
 
   -and/or-
 
