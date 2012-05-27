@@ -124,7 +124,7 @@ Protocol
   [service]
   + upon    msg/<msgid>/<hostname>/<username>
   + checkno /cables/rqueue/<msgid>                 (ok and skip if exists)
-  + create  /cables/rqueue/<msgid>.new/            (ok if exists)
+  + create  /cables/rqueue/<msgid>.new/            (ok if exists, skip if locked)
   + write   /cables/rqueue/<msgid>.new/{username,hostname}
   + create  /cables/rqueue/<msgid>.new/peer.req    (ok if exists)
   + rename  /cables/rqueue/<msgid>.new             -> <msgid>
@@ -143,7 +143,7 @@ Protocol
 <recv> (recipient)
   [service]
   + upon    snd/<msgid>/<sendmac>
-  + check   /cables/rqueue/<msgid>/peer.ok
+  + check   /cables/rqueue/<msgid>/peer.ok         (skip if dir locked)
   + write   /cables/rqueue/<msgid>/send.mac        (skip if exists)
   + create  /cables/rqueue/<msgid>/recv.req        (atomic, ok if exists)
   + touch   /cables/rqueue/<msgid>/                (if recv.req did not exist)
@@ -175,7 +175,7 @@ Protocol
 <ack> (sender)
   [service]
   + upon    rcp/<msgid>/<recvmac>
-  + check   /cables/queue/<msgid>/send.ok
+  + check   /cables/queue/<msgid>/send.ok          (skip if dir locked)
   + compare /cables/queue/<msgid>/recv.mac        <-> <recvmac>
   + create  /cables/queue/<msgid>/ack.req          (atomic, ok if exists)
   + touch   /cables/queue/<msgid>/                 (if ack.req did not exist)

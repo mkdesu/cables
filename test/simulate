@@ -94,9 +94,18 @@ mv ${root}/user2/www/{cable,`cat ${root}/user2/cable/certs/username`}
 
 
 sinfo "Testing CGI service"
+
+# csexec <request>
+# csexec <lock> <dir> <request>
 csexec() {
+    local lock=
+    if [ "$1" = lock ]; then
+        lock="flock $2/"
+        shift 2
+    fi
+
     local req="$1"
-    CABLE_QUEUES=${root}/user1/queues PATH_INFO="${req}" ${root}/stage1/libexec/cable/service 2>&1 | sed '/^$\|:/d'
+    CABLE_QUEUES=${root}/user1/queues PATH_INFO="${req}" ${lock} ${root}/stage1/libexec/cable/service 2>&1 | sed '/^$\|:/d'
 }
 
 mid1=1111111111aaaaaaaaaa9999999999ffffffffff
@@ -107,7 +116,10 @@ user1=25ebhnuidr6sbporsuhm43tig6oj2moo
 mac1=13c3fc33754e4266df492a43f8aa72a82e2ef55eb0f20051da98c8c96dfd0cef576e895b9a61211a5ee1b3057999e56db1b6ff39d5502963c0266095e4c62612
 mac2=6a799bb1b80087cc23f5955551f2e56c08f69287f87fb59fdb21251d912b8d6be8791f7528f82fe7ab453f432b04ac9859d8524d01740810d87c1c6a19781e97
 
+# oversize long request
 [ "`csexec ${mac1}${mac1}${mac1}${mac1}/`" = BADREQ ]
+
+# incorrect request formats
 for req in "" \
            msg/${mid1//f/F}/${host1}/${user1}  \
            msg/${mid1}/${host1//3/1}/${user1}  \
@@ -123,48 +135,76 @@ for req in "" \
     do  [ "`csexec ${req}`" = BADFMT ]
 done
 
+# msg request (mid1, host1, user1)
 [ "`csexec msg/${mid1}/${host1}/${user1}`" = "${version}" ]
 [ -e ${root}/user1/queues/rqueue/${mid1}/peer.req ]
 
+# repeated msg request (mid1, host1, user1) [ok and skip if exists]
 [ "`csexec msg/${mid1}/${host1}/${user1}`" = "${version}" ]
-mv ${root}/user1/queues/rqueue/${mid1}{,.new}
 
+# simultaneous msg request (mid1, host2, user1) [skip if locked]
+mv ${root}/user1/queues/rqueue/${mid1}{,.new}
+[ "`csexec lock ${root}/user1/queues/rqueue/${mid1}.new msg/${mid1}/${host2}/${user1}`" = "${version}" ]
+[ "`cat ${root}/user1/queues/rqueue/${mid1}.new/hostname`" = ${host1} ]
+
+# repeated msg request after failed msg (mid1, host2, user1)
 [ "`csexec msg/${mid1}/${host2}/${user1}`" = "${version}" ]
 [ "`cat ${root}/user1/queues/rqueue/${mid1}/hostname`" = ${host2} ]
 
+
+# too early snd request (mid1, mac1) [check peer.ok]
 [ "`csexec snd/${mid1}/${mac1}`" = ERROR ]
 [ ! -e ${root}/user1/queues/rqueue/${mid1}/send.mac ]
 
+# simultaneous snd request (mid1, mac1) [skip if locked]
 touch ${root}/user1/queues/rqueue/${mid1}/peer.ok
+[ "`csexec lock ${root}/user1/queues/rqueue/${mid1} snd/${mid1}/${mac1}`" = "${version}" ]
+[ ! -e ${root}/user1/queues/rqueue/${mid1}/send.mac ]
+[ ! -e ${root}/user1/queues/rqueue/${mid1}/recv.req ]
+
+# snd request (mid1, mac1)
 [ "`csexec snd/${mid1}/${mac1}`" = "${version}" ]
 [ "`cat ${root}/user1/queues/rqueue/${mid1}/send.mac`" = ${mac1} ]
 [ ${root}/user1/queues/rqueue/${mid1}/recv.req -ef ${root}/user1/queues/rqueue/${mid1}/peer.ok  ]
 
+# repeated snd request (mid1, mac2) [write send.mac: skip if exists]
 [ "`csexec snd/${mid1}/${mac2}`" = "${version}" ]
 [ "`cat ${root}/user1/queues/rqueue/${mid1}/send.mac`" = ${mac1} ]
 
+
+# too early rcp request (mid2, mac1) [check send.ok]
 mkdir ${root}/user1/queues/queue/${mid2}
 echo ${mac1} > ${root}/user1/queues/queue/${mid2}/recv.mac
 [ "`csexec rcp/${mid2}/${mac1}`" = ERROR ]
 [ ! -e ${root}/user1/queues/queue/${mid2}/ack.req ]
 
+# simultaneous rcp request (mid2, mac1) [skip if locked]
 touch ${root}/user1/queues/queue/${mid2}/send.ok
+[ "`csexec lock ${root}/user1/queues/queue/${mid2} rcp/${mid2}/${mac1}`" = "${version}" ]
+[ ! -e ${root}/user1/queues/queue/${mid2}/ack.req ]
+
+# rcp request (mid2, mac1)
 [ "`csexec rcp/${mid2}/${mac1}`" = "${version}" ]
 [ ${root}/user1/queues/queue/${mid2}/ack.req -ef ${root}/user1/queues/queue/${mid2}/send.ok ]
 
+# incorrect rcp request (mid2, mac2) [compare recv.mac]
 rm ${root}/user1/queues/queue/${mid2}/ack.req
 [ "`csexec rcp/${mid2}/${mac2}`" = ERROR ]
 [ ! -e ${root}/user1/queues/queue/${mid2}/ack.req ]
 
+
+# too early ack request (mid1, mac1) [check recv.ok]
 rm ${root}/user1/queues/rqueue/${mid1}/*
 echo ${mac1} > ${root}/user1/queues/rqueue/${mid1}/ack.mac
 [ "`csexec ack/${mid1}/${mac1}`" = ERROR ]
 [ -e ${root}/user1/queues/rqueue/${mid1} ]
 
+# ack request (mid1, mac1)
 touch ${root}/user1/queues/rqueue/${mid1}/recv.ok
 [ "`csexec ack/${mid1}/${mac1}`" = "${version}" ]
 [ -e ${root}/user1/queues/rqueue/${mid1}.del ]
 
+# incorrect ack request (mid1, mac2) [compare ack.mac]
 mv -T ${root}/user1/queues/rqueue/${mid1}{.del,}
 [ "`csexec ack/${mid1}/${mac2}`" = ERROR ]
 [ -e ${root}/user1/queues/rqueue/${mid1} ]
