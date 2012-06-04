@@ -5,16 +5,12 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <locale.h>
 #include <string.h>
-#include <ctype.h>
 
 int main(int argc, char *argv[]) {
     char *hex, *b32;
     int  len, i, j, digit, sum;
     
-    setlocale(LC_ALL, "C");
-
     if (argc != 2) {
         printf("%s <hex>\n", argv[0]);
         return 1;
@@ -37,19 +33,16 @@ int main(int argc, char *argv[]) {
 
     for (i = 0;  i < len; ) {
         for (j = sum = 0;  j < 5;  ++i, ++j) {
-            if (!isxdigit(hex[i])) {
+            if      (hex[i] >= '0'  &&  hex[i] <= '9')
+                digit = hex[i] - '0';
+            else if (hex[i] >= 'a'  &&  hex[i] <= 'f')
+                digit = hex[i] - 'a' + 10;
+            else if (hex[i] >= 'A'  &&  hex[i] <= 'F')
+                digit = hex[i] - 'A' + 10;
+            else {
                 printf("Non-hexadecimal character encountered\n");
                 return 1;
             }
-
-            if (isdigit(hex[i]))
-                digit = hex[i] - '0';
-            else if (islower(hex[i]))
-                digit = hex[i] - 'a' + 10;
-            else if (isupper(hex[i]))
-                digit = hex[i] - 'A' + 10;
-            else
-                return 2;
 
             sum = sum * 16 + digit;
         }

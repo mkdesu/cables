@@ -144,11 +144,13 @@ Protocol
   + write   /cables/rqueue/<msgid>/send.mac        (skip if exists)
   + create  /cables/rqueue/<msgid>/recv.req        (atomic, ok if exists)
   + touch   /cables/rqueue/<msgid>/                (if recv.req did not exist)
+  (dir can be renamed at any moment by <fin>[service])
 
   [fetch loop]
   + check   /cables/rqueue/<msgid>/recv.req
   + check   /cables/rqueue/<msgid>/send.mac
   + checkno /cables/rqueue/<msgid>/recv.{rdy,ok}   (in this order)
+  (dir can be renamed at any moment by <fin>[service] before this point)
   + fetch   <hostname>/<username>/queue/<msgid>     -> /cables/rqueue/<msgid>/message.enc
   + fetch   <hostname>/<username>/queue/<msgid>.key -> /cables/rqueue/<msgid>/speer.sig
   + fetch   <hostname>/<username>/certs/{ca,verify}.pem -> /cables/rqueue/<msgid>/

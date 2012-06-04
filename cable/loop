@@ -2,10 +2,6 @@
 
 # This script ensures at most one running instance for a <msgid>
 
-umask 077
-export LC_ALL=C
-
-
 if [ $# -lt 2  -o  \( queue != "$1"  -a  rqueue != "$1" \) ]; then
     echo "Format: $0 queue|rqueue <msgid>[.del]"
     exit 1

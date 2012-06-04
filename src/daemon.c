@@ -4,7 +4,6 @@
  */
 
 #include <unistd.h>
-#include <ctype.h>
 #include <stdio.h>
 #include <dirent.h>
 #include <string.h>
@@ -13,7 +12,6 @@
 #include <fcntl.h>
 #include <time.h>
 #include <signal.h>
-#include <locale.h>
 #include <stdarg.h>
 #include <syslog.h>
 #include <sys/types.h>
@@ -311,19 +309,20 @@ static void set_signals() {
 
 
 /* lower-case hexadecimal of correct length, possibly ending with ".del" */
-static int is_msgdir(const char *s) {
+static int is_msgdir(char *s) {
     size_t len = strlen(s);
-    int    i;
+    int    res = 0;
 
-    if (! (len == MSGID_LENGTH  ||
-           (len == MSGID_LENGTH+4  &&  strcmp(".del", s + MSGID_LENGTH) == 0)))
-        return 0;
+    if (len == MSGID_LENGTH)
+        res = vfyhex(MSGID_LENGTH, s);
 
-    for (i = 0;  i < MSGID_LENGTH;  ++i)
-        if (! (isxdigit(s[i])  &&  !isupper(s[i])))
-            return 0;
+    else if (len == MSGID_LENGTH+4  &&  strcmp(".del", s + MSGID_LENGTH) == 0) {
+        s[MSGID_LENGTH] = '\0';
+        res = vfyhex(MSGID_LENGTH, s);
+        s[MSGID_LENGTH] = '.';
+    }
 
-    return 1;
+    return res;
 }
 
 
@@ -415,10 +414,11 @@ static double getmontime() {
 
 /* exec run_loop for all correct entries in (r)queue directory */
 static void retry_dir(const char *qtype, const char *qpath, const char *looppath) {
-    DIR    *qdir;
-    struct dirent *de = NULL;
+    /* [offsetof(struct dirent, d_name) + fpathconf(fd, _PC_NAME_MAX) + 1] */
+    struct dirent de, *deres;
     struct stat   st;
-    int    fd, run;
+    DIR    *qdir;
+    int    fd, run, rdres;
 
     /* open directory */
     if ((qdir = opendir(qpath)) == NULL)
@@ -427,24 +427,24 @@ static void retry_dir(const char *qtype, const char *qpath, const char *looppath
     else if ((fd = dirfd(qdir)) == -1)
         error();
     else {
-        for (errno = 0;  !stop  &&  (de = readdir(qdir)) != NULL; ) {
+        for (rdres = errno = 0;  !stop  &&  (rdres = readdir_r(qdir, &de, &deres)) == 0  &&  deres == &de; ) {
             run = 0;
 
             /* some filesystems don't support d_type, need to stat entry */
-            if (de->d_type == DT_UNKNOWN  &&  is_msgdir(de->d_name)) {
-                if (fstatat(fd, de->d_name, &st, AT_SYMLINK_NOFOLLOW) == -1)
+            if (de.d_type == DT_UNKNOWN  &&  is_msgdir(de.d_name)) {
+                if (fstatat(fd, de.d_name, &st, AT_SYMLINK_NOFOLLOW) == -1)
                     warning();
                 else if (S_ISDIR(st.st_mode))
                     run = 1;
             }
-            else if (de->d_type == DT_DIR  &&  is_msgdir(de->d_name))
+            else if (de.d_type == DT_DIR  &&  is_msgdir(de.d_name))
                 run = 1;
 
             if (run)
-                run_loop(qtype, de->d_name, looppath);
+                run_loop(qtype, de.d_name, looppath);
         }
 
-        if (de == NULL  &&  errno != 0  &&  errno != EINTR)
+        if (rdres != 0  &&  rdres != EINTR  &&  errno != EINTR)
             warning();
     }
 
@@ -484,9 +484,6 @@ int main() {
     int    sz, offset, rereg, evqok = 0;
     struct inotify_event *iev;
     double retrytmout, lastclock;
-
-    umask(0077);
-    setlocale(LC_ALL, "C");
 
     /* init logging */
     syslog_init();

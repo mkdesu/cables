@@ -1,8 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <locale.h>
-#include <ctype.h>
 #include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -23,13 +21,13 @@
 #define FCREAT_MODE         (S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH)
 
 
-/* lowercase hexadecimal */
+/* lowercase hexadecimal (0-9, a-f) */
 int vfyhex(int sz, const char *s) {
     if (strlen(s) != sz)
         return 0;
 
     for (; *s; ++s)
-        if (!(isxdigit(*s) && !isupper(*s)))
+        if (!((*s >= '0' && *s <= '9') || (*s >= 'a' && *s <= 'f')))
             return 0;
 
     return 1;
@@ -42,7 +40,7 @@ int vfybase32(int sz, const char *s) {
         return 0;
 
     for (; *s; ++s)
-        if (!(islower(*s) || (*s >= '2' && *s <= '7')))
+        if (!((*s >= 'a' && *s <= 'z') || (*s >= '2' && *s <= '7')))
             return 0;
 
     return 1;

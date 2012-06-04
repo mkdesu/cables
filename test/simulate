@@ -199,10 +199,16 @@ csexec /request/${mac1}${mac1}${mac1}${mac1}        | wsgrep 400
 csexec /request/msg/${mid1//f/F}/${host1}/${user1}  | wsgrep 400
 csexec /request/msg/${mid1}/${host1//3/1}/${user1}  | wsgrep 400
 csexec /request/msg/${mid1}/${host2//3/8}/${user1}  | wsgrep 400
+csexec /request/msg/${mid1}/${host1//3/_}/${user1}  | wsgrep 400
+csexec /request/msg/${mid1}/${host1//3/{}/${user1}  | wsgrep 400
 csexec /request/msg/${mid1}/${host2}/${user1//o/O}  | wsgrep 400
 csexec /request/msg/${mid1}/${host1}/${user1}/extra | wsgrep 400
 csexec /request/snd/${mid1//f/g}/${mac1}            | wsgrep 400
 csexec /request/rcp/${mid1}/${mac1//9/A}            | wsgrep 400
+csexec /request/rcp/${mid1}/${mac1//9/:}            | wsgrep 400
+csexec /request/rcp/${mid1}/${mac1//9//}            | wsgrep 400
+csexec /request/rcp/${mid1}/${mac1//9/_}            | wsgrep 400
+csexec /request/rcp/${mid1}/${mac1//9/g}            | wsgrep 400
 csexec /request/ack/${mid1}/${mac1}0                | wsgrep 400
 csexec /request/snd/${mid1}/${mac1}/extra           | wsgrep 400
 csexec /request/ver/extra                           | wsgrep 400
@@ -388,6 +394,7 @@ ccsend 1 "I2P1 -> Tor2, I2P2 (daemon)" ${u1user}@${u1i2p} ${u2user}@${u2tor} ${u
 ccsend 2 "Tor2 -> Tor1, I2P1 (daemon)" ${u2user}@${u2tor} ${u1user}@${u1tor} ${u1user}@${u1i2p}
 ccsend 2 "I2P2 -> Tor1, I2P1 (daemon)" ${u2user}@${u2i2p} ${u1user}@${u1tor} ${u1user}@${u1i2p}
 
+# stale temporary directories removal
 faketmp=`mktemp -d --tmpdir=${root}/user1/queues/queue`
 touch ${faketmp}/test{1,2}
 fakemid=${root}/user1/queues/rqueue/012345abcd012345abcd012345abcd012345abcd.new

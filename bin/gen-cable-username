@@ -19,7 +19,7 @@ v1keysdir=${CABLE_CERTS}/../ssl/private
 certdirtmp=${certdir}.tmp
 keysdirtmp=${keysdir}.tmp
 
-# reqsubj not affected by LC_ALL
+# reqsubj not affected by locale
 rsabits=8192
 shabits=512
 reqsubj='/O=LIBERTE CABLE/CN=Anonymous'

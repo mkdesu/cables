@@ -2,7 +2,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
 #include <limits.h>
 #include <errno.h>
 #include <dirent.h>
@@ -110,7 +109,7 @@ static num_t getidx(const char *name) {
         return NOT_NUM;
 
     for (i = 0;  i < len;  ++i)
-        if (!isdigit(name[i]))
+        if (!(name[i] >= '0'  &&  name[i] <= '9'))
             return NOT_NUM;
 
     /* convert to number, checking overflow / would-be overflow */
@@ -180,7 +179,10 @@ int main(int argc, char *argv[]) {
         if (maxidx == NOT_NUM  ||  maxidx == 0)
             flogexit(LOG_ERR, "indexes exhausted, %llu not legal", maxidx);
 
-        /* convert to string, but also check back due to possible locale-related problems */
+        /*
+          convert to string, but also check back due to possible locale-related problems
+          (unlikely if setlocale() is not explicitly invoked
+        */
         spret = snprintf(numname, sizeof(numname), "%llu", maxidx);
         if (spret < 0  ||  spret >= sizeof(numname)  ||  getidx(numname) != maxidx)
             flogexit(LOG_ERR, "could not convert %llu to file name", maxidx);
