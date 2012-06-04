@@ -14,100 +14,22 @@ cd ${scriptdir:-./}..
 root=${PWD}
 
 
-# parse supported curl arguments
-args=`getopt -o sSfgo: --long compressed -- "$@"`
-eval set -- "${args}"
-out=
-url=
+# Hostnames and their replacement
+u1tor=http://`cat ${root}/user1/tor/hidden_service/hostname`
+u1i2p=http://`cat ${root}/user1/i2p/eepsite/hostname`
+u1rep=http://localhost:9081
 
-while :; do
-    case "$1" in
-        -o)
-            out="$2"
-            shift 2
-            ;;
-
-        --)
-            shift
-            break
-            ;;
-
-        *)
-            shift
-            ;;
-    esac
-done
-
-if [ $# != 1 ]; then
-    error "need single url"
-fi
-url="$1"
+u2tor=http://`cat ${root}/user2/tor/hidden_service/hostname`
+u2i2p=http://`cat ${root}/user2/i2p/eepsite/hostname`
+u2rep=http://localhost:9082
 
 
-# parse url and determine url/request staging directory
-#   http://hostname/username/{certs,queue,rqueue}/<file>
-#   http://hostname/username/request/<request>
-comps=`echo "${url}" | sed -r 's@^http://([^/]*)/([^/]*)/([^/]*)/(.*)@\1 \2 \3 \4@'`
-eval set -- "${comps}"
-
-urlhost="$1"
-urluser="$2"
-urldir="$3"
-urlpath="$4"
-
-u1tor=`cat ${root}/user1/tor/hidden_service/hostname`
-u1i2p=`cat ${root}/user1/i2p/eepsite/hostname`
-u1user=`cat ${root}/user1/cable/certs/username`
-u2tor=`cat ${root}/user2/tor/hidden_service/hostname`
-u2i2p=`cat ${root}/user2/i2p/eepsite/hostname`
-u2user=`cat ${root}/user2/cable/certs/username`
-
-if [ "${urlhost}" = "${u1tor}" -o "${urlhost}" = "${u1i2p}" ]; then
-    if [ "${urluser}" != "${u1user}" ]; then
-        error "hostname and username do not match"
-    fi
-    urlbase=${root}/user1
-    stagebase=${root}/stage1
-elif [ "${urlhost}" = "${u2tor}" -o "${urlhost}" = "${u2i2p}" ]; then
-    if [ "${urluser}" != "${u2user}" ]; then
-        error "hostname and username do not match"
-    fi
-    urlbase=${root}/user2
-    stagebase=${root}/stage2
-else
-    error "unknown hostname"
+params=`echo x "$@" | sed -r "s/^x //; s@(${u1tor}|${u1i2p})@${u1rep}@g; s@(${u2tor}|${u2i2p})@${u2rep}@g"`
+if [ "x ${params}" = "$(echo x "$@")" ]; then
+    error "502: unknown hostname"
+    exit 22
 fi
 
 
-# set "server" environment
-. ${stagebase}/etc/cable/profile
-
-if [ ! -e "${CABLE_PUB}/${urluser}" ]; then
-    error "www basedir not found"
-fi
-
-
-# handle file or request
-if [ ${urldir} != request ]; then
-    file="${CABLE_PUB}/${urluser}/${urldir}/${urlpath}"
-
-    if [ ! -e "${file}" ]; then
-        error "404: ${urldir}/${urlpath}" || :
-        exit 22
-    fi
-
-    if [ -n "${out}" ]; then
-        exec 1>"${out}"
-    fi
-
-    if ! cat "${file}" 2>/dev/null; then
-        error "ultra-404: ${urldir}/${urlpath}" || :
-        exit 22
-    fi
-else
-    if [ -n "${out}" ]; then
-        exec 1>"${out}"
-    fi
-
-    PATH_INFO="${urlpath}" ${stagebase}/libexec/cable/service | tail -n +4
-fi
+eval set -- "${params}"
+exec /usr/bin/curl "$@"

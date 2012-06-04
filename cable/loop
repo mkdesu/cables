@@ -123,14 +123,9 @@ else
             "${comm}"   recv "${msgid}"
         fi
 
-        if [ -e "${msgdir}"/peer.req ]; then
-                 "${crypto}" peer "${msgid}" && \
-            exec "${comm}"   peer "${msgid}"
-        elif [ -e "${msgdir}"/peer.ok  ]; then
-            if [ ! -e "${msgdir}"/recv.ok  ]; then
-                exec "${comm}" peer "${msgid}"
-            fi
-        else
+        if   [   -e "${msgdir}"/peer.req ]; then
+            exec "${crypto}" peer "${msgid}"
+        elif [ ! -e "${msgdir}"/peer.ok  ]; then
             error "peer.req/ok not found"
         fi
 

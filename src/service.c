@@ -1,12 +1,3 @@
-/*
-  Returned status: OK, BADREQ, BADFMT, BADCFG, <VERSION>
- */
-
-/* Alternative: _POSIX_C_SOURCE 200809L */
-#ifndef _XOPEN_SOURCE
-#define _XOPEN_SOURCE 700
-#endif
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,48 +10,21 @@
 #include <sys/stat.h>
 #include <sys/file.h>
 
+#include "daemon.h"
 
-#define VERSION             "LIBERTE CABLE 3.0"
-#define REQVAR              "PATH_INFO"
-#define MAX_REQ_LENGTH      512
 
-/* caller shouldn't be able to differentiate OK/ERROR */
-#define OK                  VERSION
-#define BADREQ              "BADREQ"
-#define BADFMT              "BADFMT"
-#define BADCFG              "BADCFG"
-#ifndef TESTING
-#define ERROR               OK
-#else
-#define ERROR               "ERROR"
-#endif
+#define MAX_REQUEST_LENGTH  255
 
-#define MSGID_LENGTH         40
 #define TOR_HOSTNAME_LENGTH  16
 #define I2P_HOSTNAME_LENGTH  52
-#define USERNAME_LENGTH      32
 #define MAC_LENGTH          128
 
 #define DCREAT_MODE         (S_IRWXU | S_IRWXG | S_IRWXO)
 #define FCREAT_MODE         (S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH)
 
-#define CABLE_QUEUES        "CABLE_QUEUES"
-#define QUEUE_SUBDIR        "queue"
-#define RQUEUE_SUBDIR       "rqueue"
-
-
-static void retstatus(const char *status) {
-#ifdef TESTING
-    if (!strcmp(status, ERROR) && errno)
-        perror("Error");
-#endif
-    puts(status);
-    exit(0);
-}
-
 
 /* lowercase hexadecimal */
-static int vfyhex(int sz, const char *s) {
+int vfyhex(int sz, const char *s) {
     if (strlen(s) != sz)
         return 0;
 
@@ -73,7 +37,7 @@ static int vfyhex(int sz, const char *s) {
 
 
 /* lowercase Base-32 encoding (a-z, 2-7) */
-static int vfybase32(int sz, const char *s) {
+int vfybase32(int sz, const char *s) {
     if (strlen(s) != sz)
         return 0;
 
@@ -108,371 +72,332 @@ static int vfyhost(char *s) {
 }
 
 
-static void write_line(int dir, const char *path, const char *s) {
-    int  fd;
+static int write_line(int dir, const char *path, const char *s) {
+    int  res = 0, fd;
     FILE *file;
 
-    if ((fd = openat(dir, path, O_CREAT | O_WRONLY | O_TRUNC, FCREAT_MODE)) == -1)
-        retstatus(ERROR);
+    if ((fd = openat(dir, path, O_CREAT | O_WRONLY | O_TRUNC, FCREAT_MODE)) != -1) {
+        if ((file = fdopen(fd, "w"))) {
+            if (s) {
+                if (fputs(s, file) >= 0  &&  fputc('\n', file) == '\n')
+                    res = 1;
+            }
+            else
+                res = 1;
 
-    if (!(file = fdopen(fd, "w"))) {
-        close(fd);
-        retstatus(ERROR);
+            if (fclose(file))
+                res = 0;
+        }
+        else
+            close(fd);
     }
 
-    if (s) {
-        if(fputs(s, file) < 0 || fputc('\n', file) != '\n') {
-            fclose(file);
-            retstatus(ERROR);
+    return res;
+}
+
+
+static int read_line(int dir, const char *path, char *s, int sz) {
+    int  res = 0, fd;
+    FILE *file;
+
+    if ((fd = openat(dir, path, O_RDONLY)) != -1) {
+        if ((file = fdopen(fd, "r"))) {
+            if(fgets(s, sz, file)  &&  fgetc(file) == EOF) {
+                sz = strlen(s);
+                if (s[sz-1] == '\n')
+                    s[sz-1] = '\0';
+
+                res = 1;
+            }
+
+            if (fclose(file))
+                res = 0;
+        }
+        else
+            close(fd);
+    }
+
+    return res;
+}
+
+
+static int check_file(int dir, const char *path) {
+    return !faccessat(dir, path, F_OK, 0);
+}
+
+
+static int create_file(int dir, const char *path) {
+    return check_file(dir, path)  ||  write_line(dir, path, NULL);
+}
+
+
+/* attemts non-blocking lock (note: errno == EWOULDBLOCK) */
+static int try_lock(int fd) {
+    return !flock(fd, LOCK_EX | LOCK_NB);
+}
+
+
+static int handle_msg(const char *msgid, const char *hostname,
+                       const char *username, int cqdir) {
+    int  res = 0, dorename = 0, msgdir;
+    char msgidnew[MSGID_LENGTH+4+1];
+
+    /* checkno /cables/rqueue/<msgid> (ok and skip if exists) */
+    if (check_file(cqdir, msgid))
+        res = 1;
+
+    else if (errno == ENOENT) {
+        /* temp base: .../cables/rqueue/<msgid>.new */
+        strncpy(msgidnew, msgid, MSGID_LENGTH);
+        strcpy(msgidnew + MSGID_LENGTH, ".new");
+
+        /* create directory (ok if exists) */
+        if (!mkdirat(cqdir, msgidnew, DCREAT_MODE)  ||  errno == EEXIST) {
+            if ((msgdir = openat(cqdir, msgidnew, O_RDONLY)) != -1) {
+                /* lock temp base (skip if locked) */
+                if (!try_lock(msgdir))
+                    res = (errno == EWOULDBLOCK);
+
+                else
+                    /* write hostname, username, and create peer.req */
+                    res = dorename =
+                           write_line(msgdir, "hostname", hostname)
+                        && write_line(msgdir, "username", username)
+                        && create_file(msgdir, "peer.req");
+
+                /* unlock and close temp base (rename triggers loop's lock) */
+                if (close(msgdir))
+                    res = 0;
+
+                /* rename .../cables/rqueue/<msgid>.new -> <msgid> */
+                if (res && dorename)
+                    if (renameat(cqdir, msgidnew, cqdir, msgid))
+                        res = 0;
+            }
         }
     }
 
-    if (fclose(file))
-        retstatus(ERROR);
+    return res;
 }
 
 
-static void create_file(int dir, const char *path) {
-    if (faccessat(dir, path, F_OK, 0))
-        write_line(dir, path, NULL);
-}
-
-
-static void read_line(int dir, const char *path, char *s, int sz) {
-    int  fd;
-    FILE *file;
-
-    if ((fd = openat(dir, path, O_RDONLY)) == -1)
-        retstatus(ERROR);
-
-    if (!(file = fdopen(fd, "r")))
-        retstatus(ERROR);
-
-    if (s) {
-        if(!fgets(s, sz, file) || fgetc(file) != EOF)
-            retstatus(ERROR);
-
-        sz = strlen(s);
-        if (s[sz-1] == '\n')
-            s[sz-1] = '\0';
-    }
-
-    if (fclose(file))
-        retstatus(ERROR);
-}
-
-
-static void check_file(int dir, const char *path) {
-    if (faccessat(dir, path, F_OK, 0))
-        retstatus(ERROR);
-}
-
-
-/* attemts lock; closes fd is lock would block */
-static int try_lock(int fd) {
-    if (!flock(fd, LOCK_EX | LOCK_NB))
-        return 1;
-
-    if (errno == EWOULDBLOCK) {
-        if (close(fd))
-            retstatus(ERROR);
-    }
-    else
-        retstatus(ERROR);
-
-    return 0;
-}
-
-
-static void handle_msg(const char *msgid, const char *hostname,
-                       const char *username, int cqdir) {
-    char msgidnew[MSGID_LENGTH+4+1];
-    int  msgdir;
-
-    /* checkno /cables/rqueue/<msgid> (ok and skip if exists) */
-    if (!faccessat(cqdir, msgid, F_OK, 0))
-        return;
-
-    /* temp base: .../cables/rqueue/<msgid>.new */
-    strncpy(msgidnew, msgid, MSGID_LENGTH);
-    strcpy(msgidnew + MSGID_LENGTH, ".new");
-
-    /* create directory (ok if exists) */
-    if (mkdirat(cqdir, msgidnew, DCREAT_MODE) && errno != EEXIST)
-        retstatus(ERROR);
-
-    if ((msgdir = openat(cqdir, msgidnew, O_RDONLY)) == -1)
-        retstatus(ERROR);
-
-    /* lock temp base (ok if locked) */
-    if (!try_lock(msgdir))
-        return;
-
-    /* write hostname */
-    write_line(msgdir, "hostname", hostname);
-
-    /* write username */
-    write_line(msgdir, "username", username);
-
-    /* create peer.req */
-    create_file(msgdir, "peer.req");
-
-    /* unlock and close temp base (rename triggers loop's lock) */
-    if (close(msgdir))
-        retstatus(ERROR);
-
-    /* rename .../cables/rqueue/<msgid>.new -> <msgid> */
-    if (renameat(cqdir, msgidnew, cqdir, msgid))
-        retstatus(ERROR);
-}
-
-
-static void handle_snd(const char *msgid, const char *mac, int cqdir) {
-    int  msgdir;
+static int handle_snd(const char *msgid, const char *mac, int cqdir) {
+    int res = 0, msgdir;
 
     /* base: .../cables/rqueue/<msgid> */
-    if ((msgdir = openat(cqdir, msgid, O_RDONLY)) == -1)
-        retstatus(ERROR);
+    if ((msgdir = openat(cqdir, msgid, O_RDONLY)) != -1) {
+        /* lock base (skip if locked) */
+        if (!try_lock(msgdir))
+            res = (errno == EWOULDBLOCK);
 
-    /* lock base (ok if locked) */
-    if (!try_lock(msgdir))
-        return;
+        /* check peer.ok */
+        else if (check_file(msgdir, "peer.ok")) {
+            /* write send.mac (skip if exists) */
+            if (check_file(msgdir, "send.mac")
+                || (errno == ENOENT  &&  write_line(msgdir, "send.mac", mac))) {
+                /* create recv.req (atomic, ok if exists) */
+                if (linkat(msgdir, "peer.ok", msgdir, "recv.req", 0))
+                    res = (errno == EEXIST);
+                else
+                    res =
+                        /* unlock base (touch triggers loop's lock) */
+                           !flock(msgdir, LOCK_UN)
+                        /* touch /cables/rqueue/<msgid>/ (if recv.req didn't exist) */
+                        /* euid owns msgdir, so O_RDWR is not needed */
+                        && !futimens(msgdir, NULL);
+            }
+        }
 
-    /* check peer.ok */
-    check_file(msgdir, "peer.ok");
-
-    /* write send.mac (skip if exists) */
-    if (faccessat(msgdir, "send.mac", F_OK, 0))
-        write_line(msgdir, "send.mac", mac);
-
-    /* create recv.req (atomic, ok if exists) */
-    if (! linkat(msgdir, "peer.ok", msgdir, "recv.req", 0)) {
-        /* unlock base (touch triggers loop's lock) */
-        if (flock(msgdir, LOCK_UN))
-            retstatus(ERROR);
-
-        /* touch /cables/rqueue/<msgid>/ (if recv.req didn't exist) */
-        /* euid owns msgdir, so O_RDWR is not needed */
-        if (futimens(msgdir, NULL))
-            retstatus(ERROR);
+        /* close base (and unlock if locked) */
+        if (close(msgdir))
+            res = 0;
     }
-    else if (errno != EEXIST)
-        retstatus(ERROR);
 
-    if (close(msgdir))
-        retstatus(ERROR);
+    return res;
 }
 
 
-static void handle_rcp(const char *msgid, const char *mac, int cqdir) {
+static int handle_rcp(const char *msgid, const char *mac, int cqdir) {
+    int  res = 0, msgdir;
     char exmac[MAC_LENGTH+2];
-    int  msgdir;
 
     /* base: .../cables/queue/<msgid> */
-    if ((msgdir = openat(cqdir, msgid, O_RDONLY)) == -1)
-        retstatus(ERROR);
+    if ((msgdir = openat(cqdir, msgid, O_RDONLY)) != -1) {
+        /* lock base (skip if locked) */
+        if (!try_lock(msgdir))
+            res = (errno == EWOULDBLOCK);
 
-    /* lock base (ok if locked) */
-    if (!try_lock(msgdir))
-        return;
+        /* check send.ok */
+        /* read recv.mac */
+        /* compare <recvmac> <-> recv.mac */
+        else if (check_file(msgdir, "send.ok")
+                 && read_line(msgdir, "recv.mac", exmac, sizeof(exmac))
+                 && !strcmp(mac, exmac)) {
+            /* create ack.req (atomic, ok if exists) */
+            if (linkat(msgdir, "send.ok", msgdir, "ack.req", 0))
+                res = (errno == EEXIST);
+            else
+                res =
+                    /* unlock base (touch triggers loop's lock) */
+                       !flock(msgdir, LOCK_UN)
+                    /* touch /cables/queue/<msgid>/ (if ack.req didn't exist) */
+                    /* euid owns msgdir, so O_RDWR is not needed */
+                    && !futimens(msgdir, NULL);
+        }
 
-    /* check send.ok */
-    check_file(msgdir, "send.ok");
-
-    /* read recv.mac */
-    read_line(msgdir, "recv.mac", exmac, sizeof(exmac));
-
-    /* compare <recvmac> <-> recv.mac */
-    if (strcmp(mac, exmac))
-        retstatus(ERROR);
-
-    /* create ack.req (atomic, ok if exists) */
-    if (! linkat(msgdir, "send.ok", msgdir, "ack.req", 0)) {
-        /* unlock base (touch triggers loop's lock) */
-        if (flock(msgdir, LOCK_UN))
-            retstatus(ERROR);
-
-        /* touch /cables/queue/<msgid>/ (if ack.req didn't exist) */
-        /* euid owns msgdir, so O_RDWR is not needed */
-        if (futimens(msgdir, NULL))
-            retstatus(ERROR);
+        /* close base (and unlock if locked) */
+        if (close(msgdir))
+            res = 0;
     }
-    else if (errno != EEXIST)
-        retstatus(ERROR);
 
-    if (close(msgdir))
-        retstatus(ERROR);
+    return res;
 }
 
 
-static void handle_ack(const char *msgid, const char *mac, int cqdir) {
+static int handle_ack(const char *msgid, const char *mac, int cqdir) {
+    int  res = 0, msgdir;
     char msgiddel[MSGID_LENGTH+4+1], exmac[MAC_LENGTH+2];
-    int  msgdir;
 
     /* base: .../cables/rqueue/<msgid> */
-    if ((msgdir = openat(cqdir, msgid, O_RDONLY)) == -1)
-        retstatus(ERROR);
+    if ((msgdir = openat(cqdir, msgid, O_RDONLY)) != -1) {
+        /* lock base (ok if locked) */
+        if (try_lock(msgdir)  ||  (errno == EWOULDBLOCK))
+            res =
+                /* check recv.ok */
+                   check_file(msgdir, "recv.ok")
+                /* read ack.mac */
+                && read_line(msgdir, "ack.mac", exmac, sizeof(exmac))
+                /* compare <ackmac> <-> ack.mac */
+                && !strcmp(mac, exmac);
 
-    /* check recv.ok */
-    check_file(msgdir, "recv.ok");
-
-    /* read ack.mac */
-    read_line(msgdir, "ack.mac", exmac, sizeof(exmac));
-
-    /* close base */
-    if (close(msgdir))
-        retstatus(ERROR);
-
-    /* compare <ackmac> <-> ack.mac */
-    if (strcmp(mac, exmac))
-        retstatus(ERROR);
+        /* close base (and unlock if locked) */
+        if (close(msgdir))
+            res = 0;
+    }
 
     /* rename .../cables/rqueue/<msgid> -> <msgid>.del */
-    strncpy(msgiddel, msgid, MSGID_LENGTH);
-    strcpy(msgiddel + MSGID_LENGTH, ".del");
+    if (res) {
+        strncpy(msgiddel, msgid, MSGID_LENGTH);
+        strcpy(msgiddel + MSGID_LENGTH, ".del");
 
-    if (renameat(cqdir, msgid, cqdir, msgiddel))
-        retstatus(ERROR);
+        if (renameat(cqdir, msgid, cqdir, msgiddel))
+            res = 0;
+    }
+
+    return res;
 }
 
 
-int open_cqdir(const char *subdir) {
-    const char *cqenv;
-    char       *buf;
-    size_t     varlen;
-    int        cqdir;
-
-    /* get queues prefix from environment */
-    if (!(cqenv = getenv(CABLE_QUEUES)))
-        retstatus(BADCFG);
-
-    /* allocate buffer: cqenv + '/' + subdir + '\0' */
-    varlen = strlen(cqenv);
-    if (!(buf = (char*) malloc(varlen + strlen(subdir) + 2)))
-        retstatus(ERROR);
-
-    /* fill buffer */
-    strncpy(buf, cqenv, varlen);
-    cqenv       = NULL;
-    buf[varlen] = '/';
-    strcpy(buf + varlen + 1, subdir);
-
-    /* get file descriptor */
-    if ((cqdir = open(buf, O_RDONLY)) == -1)
-        retstatus(ERROR);
-
-    free(buf);
-    return cqdir;
-}
+/*
+  returns memory-persistent response (including trailing newline)
+  thread-safe
+  does not leak memory / file descriptors
+ */
+enum SVC_Status handle_request(const char *request, const char *queues, const char *rqueues) {
+    enum   SVC_Status status = SVC_BADFMT;
+    char   buf[MAX_REQUEST_LENGTH+1], *saveptr, *cmd, *msgid, *arg1, *arg2;
+    int    cqdir;
+    size_t reqlen;
 
 
-int main() {
-    char       buf[MAX_REQ_LENGTH+1];
-    const char *pathinfo, *delim = "/";
-    char       *cmd, *msgid, *arg1, *arg2;
-    int        cqdir = -1;
+    /* Copy request to modifiable buffer, check for length and bad delimiters */
+    reqlen = strlen(request);
+    if (reqlen < sizeof(buf)  &&  reqlen > 0
+        &&  !strstr(request, "//")
+        &&  request[0] != '/'  &&  request[reqlen-1] != '/') {
+        strcpy(buf, request);
 
-    umask(0077);
-    setlocale(LC_ALL, "C");
+        /* Tokenize the request */
+        cmd   = strtok_r(buf,  "/", &saveptr);
+        msgid = strtok_r(NULL, "/", &saveptr);
+        arg1  = strtok_r(NULL, "/", &saveptr);
+        arg2  = strtok_r(NULL, "/", &saveptr);
 
-    
-    /* HTTP headers */
-    printf("Content-Type: text/plain\n"
-           "Cache-Control: no-cache\n\n");
+        if (cmd  &&  !strtok_r(NULL, "/", &saveptr)) {
+            /*
+               ver
+               msg/<msgid>/<hostname>/<username>
+               snd/<msgid>/<mac>
+               rcp/<msgid>/<mac>
+               ack/<msgid>/<mac>
 
+               msgid:    MSGID_LENGTH        lowercase xdigits
+               mac:      MAC_LENGTH          lowercase xdigits
+               hostname: TOR_HOSTNAME_LENGTH lowercase base-32 chars + ".onion"
+                         I2P_HOSTNAME_LENGTH lowercase base-32 chars + ".b32.i2p"
+               username: USERNAME_LENGTH     lowercase base-32 chars
+            */
+            if (!strcmp("ver", cmd)) {
+                if (!msgid)
+                    status = SVC_OK;
+            }
+            else if (!strcmp("msg", cmd)) {
+                if (arg2
+                    && vfyhex(MSGID_LENGTH, msgid)
+                    && vfyhost(arg1)
+                    && vfybase32(USERNAME_LENGTH, arg2)) {
 
-    /* Check request availability and length */
-    pathinfo = getenv(REQVAR);
-    if (!pathinfo || strlen(pathinfo) >= sizeof(buf))
-        retstatus(BADREQ);
+                    status = SVC_ERR;
 
-    /* Copy request to writeable buffer */
-    strcpy(buf, pathinfo);
-    pathinfo = NULL;
+                    if ((cqdir = open(rqueues, O_RDONLY)) != -1) {
+                        if (handle_msg(msgid, arg1, arg2, cqdir))
+                            status = SVC_OK;
 
+                        if (close(cqdir))
+                            status = SVC_ERR;
+                    }
+                }
+            }
+            else if (!strcmp("snd", cmd)) {
+                if (arg1 && !arg2
+                    && vfyhex(MSGID_LENGTH, msgid)
+                    && vfyhex(MAC_LENGTH, arg1)) {
 
-    /* Tokenize the request */
-    cmd   = strtok(buf,  delim);
-    msgid = strtok(NULL, delim);
-    arg1  = strtok(NULL, delim);
-    arg2  = strtok(NULL, delim);
+                    status = SVC_ERR;
 
-    if (strtok(NULL, delim) || !cmd)
-        retstatus(BADFMT);
+                    if ((cqdir = open(rqueues, O_RDONLY)) != -1) {
+                        if (handle_snd(msgid, arg1, cqdir))
+                            status = SVC_OK;
 
+                        if (close(cqdir))
+                            status = SVC_ERR;
+                    }
+                }
+            }
+            else if (!strcmp("rcp", cmd)) {
+                if (arg1 && !arg2
+                    && vfyhex(MSGID_LENGTH, msgid)
+                    && vfyhex(MAC_LENGTH, arg1)) {
 
-    /* Handle commands
+                    status = SVC_ERR;
 
-       ver
-       msg/<msgid>/<hostname>/<username>
-       snd/<msgid>/<mac>
-       rcp/<msgid>/<mac>
-       ack/<msgid>/<mac>
+                    if ((cqdir = open(queues, O_RDONLY)) != -1) {
+                        if (handle_rcp(msgid, arg1, cqdir))
+                            status = SVC_OK;
 
-       msgid:    MSGID_LENGTH        lowercase xdigits
-       mac:      MAC_LENGTH          lowercase xdigits
-       hostname: TOR_HOSTNAME_LENGTH lowercase base-32 chars + ".onion"
-                 I2P_HOSTNAME_LENGTH lowercase base-32 chars + ".b32.i2p"
-       username: USERNAME_LENGTH     lowercase base-32 chars
-    */
-    if (!strcmp("ver", cmd)) {
-        if (msgid)
-            retstatus(BADFMT);
+                        if (close(cqdir))
+                            status = SVC_ERR;
+                    }
+                }
+            }
+            else if (!strcmp("ack", cmd)) {
+                if (arg1 && !arg2
+                    && vfyhex(MSGID_LENGTH, msgid)
+                    && vfyhex(MAC_LENGTH, arg1)) {
 
-        retstatus(VERSION);
+                    status = SVC_ERR;
+
+                    if ((cqdir = open(rqueues, O_RDONLY)) != -1) {
+                        if (handle_ack(msgid, arg1, cqdir))
+                            status = SVC_OK;
+
+                        if (close(cqdir))
+                            status = SVC_ERR;
+                    }
+                }
+            }
+        }
     }
-    else if (!strcmp("msg", cmd)) {
-        if (!arg2)
-            retstatus(BADFMT);
 
-        if (   !vfyhex(MSGID_LENGTH, msgid)
-            || !vfyhost(arg1)
-            || !vfybase32(USERNAME_LENGTH, arg2))
-            retstatus(BADFMT);
-
-        cqdir = open_cqdir(RQUEUE_SUBDIR);
-        handle_msg(msgid, arg1, arg2, cqdir);
-    }
-    else if (!strcmp("snd", cmd)) {
-        if (!arg1 || arg2)
-            retstatus(BADFMT);
-
-        if (   !vfyhex(MSGID_LENGTH, msgid)
-            || !vfyhex(MAC_LENGTH, arg1))
-            retstatus(BADFMT);
-
-        cqdir = open_cqdir(RQUEUE_SUBDIR);
-        handle_snd(msgid, arg1, cqdir);
-    }
-    else if (!strcmp("rcp", cmd)) {
-        if (!arg1 || arg2)
-            retstatus(BADFMT);
-
-        if (   !vfyhex(MSGID_LENGTH, msgid)
-            || !vfyhex(MAC_LENGTH, arg1))
-            retstatus(BADFMT);
-
-        cqdir = open_cqdir(QUEUE_SUBDIR);
-        handle_rcp(msgid, arg1, cqdir);
-    }
-    else if (!strcmp("ack", cmd)) {
-        if (!arg1 || arg2)
-            retstatus(BADFMT);
-
-        if (   !vfyhex(MSGID_LENGTH, msgid)
-            || !vfyhex(MAC_LENGTH, arg1))
-            retstatus(BADFMT);
-
-        cqdir = open_cqdir(RQUEUE_SUBDIR);
-        handle_ack(msgid, arg1, cqdir);
-    }
-    else
-        retstatus(BADFMT);
-
-
-    if (close(cqdir))
-        retstatus(ERROR);
-
-    retstatus(OK);
-    return 0;
+    return status;
 }

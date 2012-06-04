@@ -1,13 +1,3 @@
-/* Alternative: _POSIX_C_SOURCE 200809L */
-#ifndef _XOPEN_SOURCE
-#define _XOPEN_SOURCE 700
-#endif
-
-/* DT_DIR, DT_UNKNOWN, dirfd() */
-#ifndef _BSD_SOURCE
-#define _BSD_SOURCE
-#endif
-
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>

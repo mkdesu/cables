@@ -70,13 +70,6 @@ Protocol
   + all code blocks are restartable (e.g., after crash)
   + messages and confirmations are never lost if /cables filesystem is transactional
 
-  + <hostname>/<username>/                         transient public directory w/o list permission
-                  /certs/{ca.pem,verify.pem}       public certificates
-                  /queue/<msgid>                   outgoing message <msgid>
-                  /queue/<msgid>.key               outgoing message <msgid>'s ephemeral peer key
-                  /rqueue/<msgid>.key              incoming message <msgid>'s ephemeral peer key
-                  /request/...                     service interface
-
   + /cables/                                       private directory
                   /queue/<msgid>/                  outgoing message <msgid> work dir
                   /rqueue/<msgid>/                 incoming message <msgid> work dir
@@ -86,8 +79,19 @@ Protocol
   + [crypto loop] writes to /cables/(r)queue, MUA inbox directory;
                   reads from certs (public, private) directories
   + [fetch  loop] writes to /cables/(r)queue, network
-  + [comm   loop] writes to /{<username>,cables}/(r)queue, network;
+  + [comm   loop] writes to network;
                   reads username from certs directory
+  + [webserver]   writes to network;
+                  reads from certs public directory, /cables/(r)queue
+
+
+[webserver]
+  + /<username>                                    common URL prefix
+  +   /certs/{ca,verify}.pem                       serve  public certificates
+  +   /queue/<msgid>                               serve  /cables/queue/<msgid>/message.enc
+  +   /queue/<msgid>.key                           serve  /cables/queue/<msgid>/speer.sig
+  +   /rqueue/<msgid>.key                          serve  /cables/rqueue/<msgid>/rpeer.sig
+  +   /request/...                                 invoke service[...] and serve answer
 
 
 <send> (sender)
@@ -106,7 +110,7 @@ Protocol
 
   [crypto loop]
   + check   /cables/queue/<msgid>/send.rdy
-  + prepare /cables/queue/<msgid>/{speer.sig,message.enc,{send,recv,ack}.mac}
+  + prepare /cables/queue/<msgid>/{speer.sig[atomic],message.enc[atomic],{send,recv,ack}.mac}
   + rename  /cables/queue/<msgid>/send.rdy         -> send.ok  (success)
   +                                                -> send.req (crypto fail)
   + remove  /cables/queue/<msgid>/{message,{ca,verify}.pem,rpeer.sig}  (if success)
@@ -114,8 +118,6 @@ Protocol
   [comm loop]
   + check   /cables/queue/<msgid>/send.ok
   + checkno /cables/queue/<msgid>/ack.ok
-  + copy    /cables/queue/<msgid>/speer.sig        -> //<susername>/queue/<msgid>.key (if not exists)
-  + copy    /cables/queue/<msgid>/message.enc      -> //<susername>/queue/<msgid>     (atomic, if not exists)
   + read    /cables/queue/<msgid>/send.mac         (128 hex digits)
   + request <hostname>/<username>/request/snd/<msgid>/<sendmac>
 
@@ -131,13 +133,8 @@ Protocol
 
   [crypto loop]
   + check   /cables/rqueue/<msgid>/peer.req
-  + prepare /cables/rqueue/<msgid>/{derive.pem,rpeer.sig}
+  + prepare /cables/rqueue/<msgid>/{derive.pem,rpeer.sig[atomic]}
   + rename  /cables/rqueue/<msgid>/peer.req        -> peer.ok (success)
-
-  [comm loop]
-  + check   /cables/rqueue/<msgid>/peer.ok
-  + checkno /cables/rqueue/<msgid>/recv.ok
-  + copy    /cables/rqueue/<msgid>/rpeer.sig       -> //<rusername>/rqueue/<msgid>.key (atomic, if not exists)
 
 
 <recv> (recipient)
@@ -170,6 +167,7 @@ Protocol
   + check   /cables/rqueue/<msgid>/recv.ok
   + read    /cables/rqueue/<msgid>/recv.mac        (128 hex digits)
   + request <hostname>/<username>/request/rcp/<msgid>/<recvmac>
+  (dir can be renamed at any moment by <fin>[service])
 
 
 <ack> (sender)
@@ -189,7 +187,6 @@ Protocol
 
   [comm loop]
   + check   /cables/queue/<msgid>/ack.ok
-  + remove  //<susername>/queue/<msgid>{,.key}     (if exists)
   + read    /cables/queue/<msgid>/ack.mac          (128 hex digits)
   + request <hostname>/<username>/request/ack/<msgid>/<ackmac>  (wait for response)
   + rename  /cables/queue/<msgid>                  -> <msgid>.del
@@ -198,20 +195,18 @@ Protocol
   -and/or-
 
   + check   /cables/queue/<msgid>.del/
-  + remove  //<susername>/queue/<msgid>{,.key}     (if exists)
   + remove  /cables/queue/<msgid>.del/
 
 
 <fin> (recipient)
   [service]
   + upon    ack/<msgid>/<ackmac>
-  + check   /cables/rqueue/<msgid>/recv.ok
+  + check   /cables/rqueue/<msgid>/recv.ok         (ok if dir locked)
   + compare /cables/rqueue/<msgid>/ack.mac        <-> <ackmac>
   + rename  /cables/rqueue/<msgid>                 -> <msgid>.del
 
   [comm loop]
   + check   /cables/rqueue/<msgid>.del/
-  + remove  //<rusername>/rqueue/<msgid>.key       (if exists)
   + remove  /cables/rqueue/<msgid>.del/
 
 

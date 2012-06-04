@@ -4,20 +4,24 @@ sinfo() {
     echo -e "\033[1;33;41m$@\033[0m"
 }
 
-version="LIBERTE CABLE 3.0"
+trap '[ $? = 0 ] || kill ${killpid1} ${killpid2} >& /dev/null' 0
+killpid1= killpid2=
+
 
 scriptdir="${0%"${0##*/}"}"
 cd ${scriptdir:-./}..
 
+version="LIBERTE CABLE 3.0"
 
-root=${PWD}/stage
+
+root=${TMPDIR}/stage
 sinfo "Root dir: ${root}"
 rm -rf ${root}
 
 
 sinfo "Building"
-CFLAGS="-O2 -march=core2 -mfpmath=sse -fomit-frame-pointer -pipe -DTESTING" \
-LDFLAGS="-Wl,-O1,--as-needed,-z,combreloc" make -s
+CFLAGS="-O2 -march=core2 -mfpmath=sse -fomit-frame-pointer -pipe -g -UNDEBUG -DTESTING" \
+LDFLAGS="-Wl,-O1,--as-needed,-z,combreloc" make
 
 
 sinfo "Installing stage1"
@@ -27,12 +31,12 @@ make -s PREFIX=${root}/stage1 install
 sinfo "Setting stage1 paths for user1"
 cat >> ${root}/stage1/etc/cable/profile <<EOF
 
-export CABLE_CERTS=${root}/user1/cable
-export CABLE_TOR=${root}/user1/tor
-export CABLE_I2P=${root}/user1/i2p
-export CABLE_QUEUES=${root}/user1/queues
-export CABLE_INBOX=${root}/user1/inbox
-export CABLE_PUB=${root}/user1/www
+CABLE_CERTS=${root}/user1/cable
+CABLE_TOR=${root}/user1/tor
+CABLE_I2P=${root}/user1/i2p
+CABLE_QUEUES=${root}/user1/queues
+CABLE_INBOX=${root}/user1/inbox
+CABLE_PORT=9081
 
 export PATH=${root}/mockup:"\${PATH}"
 EOF
@@ -45,12 +49,12 @@ make -s PREFIX=${root}/stage2 install
 sinfo "Setting stage2 paths for user2"
 cat >> ${root}/stage2/etc/cable/profile <<EOF
 
-export CABLE_CERTS=${root}/user2/cable
-export CABLE_TOR=${root}/user2/tor
-export CABLE_I2P=${root}/user2/i2p
-export CABLE_QUEUES=${root}/user2/queues
-export CABLE_INBOX=${root}/user2/inbox
-export CABLE_PUB=${root}/user2/www
+CABLE_CERTS=${root}/user2/cable
+CABLE_TOR=${root}/user2/tor
+CABLE_I2P=${root}/user2/i2p
+CABLE_QUEUES=${root}/user2/queues
+CABLE_INBOX=${root}/user2/inbox
+CABLE_PORT=9082
 
 export PATH=${root}/mockup:"\${PATH}"
 EOF
@@ -67,13 +71,15 @@ cp test/oakley-group-2.pem           ${root}/stage1/etc/cable/rfc3526-modp-18.pe
 cp test/oakley-group-2.pem           ${root}/stage2/etc/cable/rfc3526-modp-18.pem
 
 
-sinfo "Removing sudo invocations and i/o redirection"
+sinfo "Removing sudo invocations and adding valgrind profiling"
 sed -i 's/sudo -n -u cable//' ${root}/stage{1,2}/bin/cable-send
 sed -i '/^sleep/d'            ${root}/stage{1,2}/libexec/cable/cabled
+sed -i "s:^exec :&valgrind --log-file=${root}/valgrind.%p --leak-check=full --track-fds=yes --track-origins=yes :" \
+                              ${root}/stage{1,2}/libexec/cable/cabled
 
 
 sinfo "Creating user paths"
-mkdir -p ${root}/user{1,2}/{cable,tor,i2p,queues/{,r}queue,inbox,www/cable/{certs,{,r}queue}}
+mkdir -p ${root}/user{1,2}/{cable,tor,i2p,queues/{,r}queue,inbox}
 
 
 sinfo "Generating cables, Tor and I2P certificates"
@@ -85,128 +91,203 @@ ${root}/stage1/bin/gen-i2p-hostname
 ${root}/stage2/bin/gen-i2p-hostname
 
 
-sinfo "Initializing www directories"
-cp ${root}/user1/{cable/certs/*.pem,www/cable/certs}
-cp ${root}/user2/{cable/certs/*.pem,www/cable/certs}
+sinfo "Testing web server API"
+CABLE_NOLOOP=1 ${root}/stage1/libexec/cable/cabled & killpid1=$!
+CABLE_NOLOOP=1 ${root}/stage2/libexec/cable/cabled & killpid2=$!
+sleep 1
 
-mv ${root}/user1/www/{cable,`cat ${root}/user1/cable/certs/username`}
-mv ${root}/user2/www/{cable,`cat ${root}/user2/cable/certs/username`}
+direxec() {
+    local host=`cat ${root}/user1/tor/hidden_service/hostname`
+    local path="$1"
+    shift
 
-
-sinfo "Testing CGI service"
-
-# csexec <request>
-# csexec <lock> <dir> <request>
-csexec() {
     local lock=
     if [ "$1" = lock ]; then
-        lock="flock $2/"
+        lock="flock $2"
         shift 2
     fi
 
-    local req="$1"
-    CABLE_QUEUES=${root}/user1/queues PATH_INFO="${req}" ${lock} ${root}/stage1/libexec/cable/service 2>&1 | sed '/^$\|:/d'
+    ${lock} ${root}/mockup/curl -sSfg "$@" http://${host}"${path}" 2>&1 \
+        | sed "s/\<${version}\>/VEROK/; s/.*: //"
 }
 
+csexec() {
+    local user=`cat ${root}/user1/cable/certs/username`
+    local req="$1"
+    shift
+
+    direxec /${user}"${req}" "$@"
+}
+
+wsgrep() {
+    grep -qw "^${1}.\?\$"
+}
+
+# authentication and basic requests
+direxec / -d x | wsgrep 405
+direxec /      | wsgrep 403
+direxec /`cat ${root}/user2/cable/certs/username` | wsgrep 403
+csexec  ""     | wsgrep 403
+
+csexec /certs/         | wsgrep 403
+csexec /certs/xx       | wsgrep 403
+csexec /request        | wsgrep 403
+csexec /request/       | wsgrep 400
+csexec /request/ver    | wsgrep VEROK
+csexec /request/ver -I | wsgrep 'HTTP/1.1 200 OK'
+csexec /request/ver/   | wsgrep 400
+
+
+# certs fetching
+csexec /certs/ca.pem                  -o ${root}/ca.pem.tmp
+csexec /certs/verify.pem              -o ${root}/verify.pem.tmp
+cmp ${root}/user1/cable/certs/ca.pem     ${root}/ca.pem.tmp
+cmp ${root}/user1/cable/certs/verify.pem ${root}/verify.pem.tmp
+rm ${root}/{ca,verify}.pem.tmp
+
+chmod u-r ${root}/user1/cable/certs/ca.pem
+csexec /certs/ca.pem | wsgrep 404
+chmod u+r ${root}/user1/cable/certs/ca.pem
+
+
+# message and key fetching
 mid1=1111111111aaaaaaaaaa9999999999ffffffffff
 mid2=0000000000bbbbbbbbbb7777777777eeeeeeeeee
+
+csexec /queue/${mid1}       | wsgrep 404
+csexec /queue/${mid1}.key   | wsgrep 404
+csexec /rqueue/${mid2}      | wsgrep 403
+csexec /rqueue/${mid2}.key  | wsgrep 404
+csexec //queue/${mid1}      | wsgrep 403
+csexec /rqueue//${mid2}.key | wsgrep 403
+csexec /queue/${mid1}0      | wsgrep 403
+csexec /queue/${mid1/a/A}   | wsgrep 403
+csexec /qqueue/${mid1}.keyx | wsgrep 403
+csexec /rqueue/${mid2}.keyx | wsgrep 403
+
+mkdir ${root}/user1/queues/queue/${mid1} ${root}/user1/queues/rqueue/${mid2}
+echo test1 > ${root}/user1/queues/queue/${mid1}/message.enc
+echo test2 > ${root}/user1/queues/queue/${mid1}/speer.sig
+echo test3 > ${root}/user1/queues/rqueue/${mid2}/rpeer.sig
+
+csexec /queue/${mid1}                           -o ${root}/message.enc.tmp
+csexec /queue/${mid1}.key                       -o ${root}/speer.sig.tmp
+csexec /rqueue/${mid2}.key                      -o ${root}/rpeer.sig.tmp
+cmp ${root}/user1/queues/queue/${mid1}/message.enc ${root}/message.enc.tmp
+cmp ${root}/user1/queues/queue/${mid1}/speer.sig   ${root}/speer.sig.tmp
+cmp ${root}/user1/queues/rqueue/${mid2}/rpeer.sig  ${root}/rpeer.sig.tmp
+
+chmod u-r ${root}/user1/queues/queue/${mid1}/message.enc
+csexec /queue/${mid1} | wsgrep 404
+
+rm -r ${root}/{message.enc,{s,r}peer.sig}.tmp \
+      ${root}/user1/queues/queue/${mid1} ${root}/user1/queues/rqueue/${mid2}
+
+
+# web service
 host1=o7te4msv3iexije6.onion
 host2=rorhxd3mqkngsj4m4y53jv42tfp2fd4bl4w7jbdeitnxw65wweaa.b32.i2p
 user1=25ebhnuidr6sbporsuhm43tig6oj2moo
 mac1=13c3fc33754e4266df492a43f8aa72a82e2ef55eb0f20051da98c8c96dfd0cef576e895b9a61211a5ee1b3057999e56db1b6ff39d5502963c0266095e4c62612
 mac2=6a799bb1b80087cc23f5955551f2e56c08f69287f87fb59fdb21251d912b8d6be8791f7528f82fe7ab453f432b04ac9859d8524d01740810d87c1c6a19781e97
 
+
 # oversize long request
-[ "`csexec ${mac1}${mac1}${mac1}${mac1}/`" = BADREQ ]
+csexec /request/${mac1}${mac1}${mac1}${mac1}        | wsgrep 400
 
 # incorrect request formats
-for req in "" \
-           msg/${mid1//f/F}/${host1}/${user1}  \
-           msg/${mid1}/${host1//3/1}/${user1}  \
-           msg/${mid1}/${host2//3/8}/${user1}  \
-           msg/${mid1}/${host2}/${user1//o/O}  \
-           msg/${mid1}/${host1}/${user1}/extra \
-           snd/${mid1//f/g}/${mac1}            \
-           rcp/${mid1}/${mac1//9/A}            \
-           ack/${mid1}/${mac1}0                \
-           snd/${mid1}/${mac1}/extra           \
-           ver/extra                           \
-           ${mac1}${mac1}${mac1}${mac1}
-    do  [ "`csexec ${req}`" = BADFMT ]
-done
+csexec /request/msg/${mid1//f/F}/${host1}/${user1}  | wsgrep 400
+csexec /request/msg/${mid1}/${host1//3/1}/${user1}  | wsgrep 400
+csexec /request/msg/${mid1}/${host2//3/8}/${user1}  | wsgrep 400
+csexec /request/msg/${mid1}/${host2}/${user1//o/O}  | wsgrep 400
+csexec /request/msg/${mid1}/${host1}/${user1}/extra | wsgrep 400
+csexec /request/snd/${mid1//f/g}/${mac1}            | wsgrep 400
+csexec /request/rcp/${mid1}/${mac1//9/A}            | wsgrep 400
+csexec /request/ack/${mid1}/${mac1}0                | wsgrep 400
+csexec /request/snd/${mid1}/${mac1}/extra           | wsgrep 400
+csexec /request/ver/extra                           | wsgrep 400
+csexec /request//ver                                | wsgrep 400
+csexec /request/ver/                                | wsgrep 400
+csexec /request/snd/${mid1}//${mac1}                | wsgrep 400
+
 
 # msg request (mid1, host1, user1)
-[ "`csexec msg/${mid1}/${host1}/${user1}`" = "${version}" ]
+csexec /request/msg/${mid1}/${host1}/${user1} | wsgrep VEROK
 [ -e ${root}/user1/queues/rqueue/${mid1}/peer.req ]
 
 # repeated msg request (mid1, host1, user1) [ok and skip if exists]
-[ "`csexec msg/${mid1}/${host1}/${user1}`" = "${version}" ]
+csexec /request/msg/${mid1}/${host1}/${user1} | wsgrep VEROK
 
 # simultaneous msg request (mid1, host2, user1) [skip if locked]
 mv ${root}/user1/queues/rqueue/${mid1}{,.new}
-[ "`csexec lock ${root}/user1/queues/rqueue/${mid1}.new msg/${mid1}/${host2}/${user1}`" = "${version}" ]
+csexec /request/msg/${mid1}/${host2}/${user1} lock ${root}/user1/queues/rqueue/${mid1}.new/ | wsgrep VEROK
 [ "`cat ${root}/user1/queues/rqueue/${mid1}.new/hostname`" = ${host1} ]
 
 # repeated msg request after failed msg (mid1, host2, user1)
-[ "`csexec msg/${mid1}/${host2}/${user1}`" = "${version}" ]
+csexec /request/msg/${mid1}/${host2}/${user1} | wsgrep VEROK
 [ "`cat ${root}/user1/queues/rqueue/${mid1}/hostname`" = ${host2} ]
 
 
 # too early snd request (mid1, mac1) [check peer.ok]
-[ "`csexec snd/${mid1}/${mac1}`" = ERROR ]
+csexec /request/snd/${mid1}/${mac1} | wsgrep 500
 [ ! -e ${root}/user1/queues/rqueue/${mid1}/send.mac ]
 
 # simultaneous snd request (mid1, mac1) [skip if locked]
 touch ${root}/user1/queues/rqueue/${mid1}/peer.ok
-[ "`csexec lock ${root}/user1/queues/rqueue/${mid1} snd/${mid1}/${mac1}`" = "${version}" ]
+csexec /request/snd/${mid1}/${mac1} lock ${root}/user1/queues/rqueue/${mid1}/ | wsgrep VEROK
 [ ! -e ${root}/user1/queues/rqueue/${mid1}/send.mac ]
 [ ! -e ${root}/user1/queues/rqueue/${mid1}/recv.req ]
 
 # snd request (mid1, mac1)
-[ "`csexec snd/${mid1}/${mac1}`" = "${version}" ]
+csexec /request/snd/${mid1}/${mac1} | wsgrep VEROK
 [ "`cat ${root}/user1/queues/rqueue/${mid1}/send.mac`" = ${mac1} ]
 [ ${root}/user1/queues/rqueue/${mid1}/recv.req -ef ${root}/user1/queues/rqueue/${mid1}/peer.ok  ]
 
 # repeated snd request (mid1, mac2) [write send.mac: skip if exists]
-[ "`csexec snd/${mid1}/${mac2}`" = "${version}" ]
+csexec /request/snd/${mid1}/${mac2} | wsgrep VEROK
 [ "`cat ${root}/user1/queues/rqueue/${mid1}/send.mac`" = ${mac1} ]
 
 
 # too early rcp request (mid2, mac1) [check send.ok]
 mkdir ${root}/user1/queues/queue/${mid2}
 echo ${mac1} > ${root}/user1/queues/queue/${mid2}/recv.mac
-[ "`csexec rcp/${mid2}/${mac1}`" = ERROR ]
+csexec /request/rcp/${mid2}/${mac1} | wsgrep 500
 [ ! -e ${root}/user1/queues/queue/${mid2}/ack.req ]
 
 # simultaneous rcp request (mid2, mac1) [skip if locked]
 touch ${root}/user1/queues/queue/${mid2}/send.ok
-[ "`csexec lock ${root}/user1/queues/queue/${mid2} rcp/${mid2}/${mac1}`" = "${version}" ]
+csexec /request/rcp/${mid2}/${mac1} lock ${root}/user1/queues/queue/${mid2}/ | wsgrep VEROK
 [ ! -e ${root}/user1/queues/queue/${mid2}/ack.req ]
 
 # rcp request (mid2, mac1)
-[ "`csexec rcp/${mid2}/${mac1}`" = "${version}" ]
+csexec /request/rcp/${mid2}/${mac1} | wsgrep VEROK
 [ ${root}/user1/queues/queue/${mid2}/ack.req -ef ${root}/user1/queues/queue/${mid2}/send.ok ]
 
 # incorrect rcp request (mid2, mac2) [compare recv.mac]
 rm ${root}/user1/queues/queue/${mid2}/ack.req
-[ "`csexec rcp/${mid2}/${mac2}`" = ERROR ]
+csexec /request/rcp/${mid2}/${mac2} | wsgrep 500
 [ ! -e ${root}/user1/queues/queue/${mid2}/ack.req ]
 
 
 # too early ack request (mid1, mac1) [check recv.ok]
 rm ${root}/user1/queues/rqueue/${mid1}/*
 echo ${mac1} > ${root}/user1/queues/rqueue/${mid1}/ack.mac
-[ "`csexec ack/${mid1}/${mac1}`" = ERROR ]
+csexec /request/ack/${mid1}/${mac1} | wsgrep 500
 [ -e ${root}/user1/queues/rqueue/${mid1} ]
 
 # ack request (mid1, mac1)
 touch ${root}/user1/queues/rqueue/${mid1}/recv.ok
-[ "`csexec ack/${mid1}/${mac1}`" = "${version}" ]
+csexec /request/ack/${mid1}/${mac1} | wsgrep VEROK
+[ -e ${root}/user1/queues/rqueue/${mid1}.del ]
+
+# simultaneous ack request (mid1, mac1) [ok if locked]
+mv -T ${root}/user1/queues/rqueue/${mid1}{.del,}
+csexec /request/ack/${mid1}/${mac1} lock ${root}/user1/queues/rqueue/${mid1}/ | wsgrep VEROK
 [ -e ${root}/user1/queues/rqueue/${mid1}.del ]
 
 # incorrect ack request (mid1, mac2) [compare ack.mac]
 mv -T ${root}/user1/queues/rqueue/${mid1}{.del,}
-[ "`csexec ack/${mid1}/${mac2}`" = ERROR ]
+csexec /request/ack/${mid1}/${mac2} | wsgrep 500
 [ -e ${root}/user1/queues/rqueue/${mid1} ]
 
 rm -r ${root}/user1/queues/rqueue/${mid1} ${root}/user1/queues/queue/${mid2}
@@ -262,7 +343,7 @@ ccloop() {
     )
 }
 
-sed -i 's/\<exit 22\>/exit 222/' ${root}/mockup/curl
+sed -i 's/\<22\>/222/' ${root}/stage{1,2}/libexec/cable/fetch
 mids=`find ${root}/user1/queues/queue -mindepth 1 -maxdepth 1 -printf '%P\n'`
 for mid in ${mids}; do
     ccloop 1 ${mid} || :
@@ -273,6 +354,11 @@ for mid in ${mids}; do
     ccloop 1 ${mid}.del
     ccloop 2 ${mid}.del
 done
+sed -i 's/\<222\>/22/' ${root}/stage{1,2}/libexec/cable/fetch
+
+kill ${killpid1} ${killpid2}
+wait ${killpid1} ${killpid2} || :
+killpid1= killpid2=
 
 
 sinfo "Testing daemon operation"
@@ -291,8 +377,8 @@ ccdaemon() {
     kill ${pid1} ${pid2}
     wait ${pid1} ${pid2} || :
 
-    if find ${root} -path '*/www/*queue/*' | grep -q .; then
-        echo "www leftovers"
+    if find ${root} -path '*queue/*' | grep -q .; then
+        echo "queue leftovers"
         return 1
     fi
 }
@@ -308,7 +394,6 @@ fakemid=${root}/user1/queues/rqueue/012345abcd012345abcd012345abcd012345abcd.new
 cp -r ${faketmp} ${fakemid}
 touch --date="2 days ago" ${faketmp} ${fakemid}
 
-sed -i 's/\<exit 222\>/exit 22/' ${root}/mockup/curl
 ccdaemon
 
 if grep -rq Failed ${root}/user{1,2}/inbox; then
@@ -327,6 +412,16 @@ echo CABLE_TMOUT=17 >> ${root}/stage2/etc/cable/profile
 ccdaemon
 
 if ! grep -rq Failed ${root}/user{1,2}/inbox; then
+    false
+fi
+
+
+sinfo "Verifying valgrind statistics"
+if grep 'in use at exit:' ${root}/valgrind.* | grep -v ' 0 bytes in 0 blocks'; then
+    false
+fi
+
+if grep 'FILE DESCRIPTORS:' ${root}/valgrind.* | grep -v ' 4 open at exit'; then
     false
 fi
 

@@ -1,22 +1,7 @@
 /*
   The following environment variables are used (from /etc/cable/profile):
-  CABLE_HOME, CABLE_QUEUES
+  CABLE_HOME, CABLE_QUEUES, CABLE_CERTS, CABLE_HOST, CABLE_PORT
  */
-
-/* Alternative: _POSIX_C_SOURCE 200809L */
-#ifndef _XOPEN_SOURCE
-#define _XOPEN_SOURCE 700
-#endif
-
-/* DT_DIR, DT_UNKNOWN, dirfd() */
-#ifndef _BSD_SOURCE
-#define _BSD_SOURCE
-#endif
-
-/* O_DIRECTORY, O_NOFOLLOW */
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
 
 #include <unistd.h>
 #include <ctype.h>
@@ -38,8 +23,22 @@
 #include <sys/wait.h>
 #include <sys/select.h>
 
+#include "daemon.h"
 
-#define MSGID_LENGTH 40
+
+/* environment variables */
+#define CABLE_HOME   "CABLE_HOME"
+#define CABLE_QUEUES "CABLE_QUEUES"
+#define CABLE_CERTS  "CABLE_CERTS"
+#define CABLE_HOST   "CABLE_HOST"
+#define CABLE_PORT   "CABLE_PORT"
+
+/* executables and subdirectories */
+#define LOOP_NAME    "loop"
+#define QUEUE_NAME   "queue"
+#define RQUEUE_NAME  "rqueue"
+#define CERTS_NAME   "certs"
+
 
 /* waiting strategy for inotify setup retries (e.g., after fs unmount) */
 #define WAIT_INIT     2
@@ -60,15 +59,6 @@
 #define WAIT_PROC   5
 #endif
 
-/* environment variables */
-#define CABLE_QUEUES "CABLE_QUEUES"
-#define CABLE_HOME   "CABLE_HOME"
-
-/* loop executable */
-#define LOOP_NAME   "loop"
-#define QUEUE_NAME  "queue"
-#define RQUEUE_NAME "rqueue"
-
 
 /* inotify file descriptor and (r)queue directories watch descriptors */
 static int inotfd = -1, inotqwd = -1, inotrqwd = -1;
@@ -86,7 +76,7 @@ static void syslog_init() {
 }
 
 /* logging */
-static void flog(int priority, const char *format, ...) {
+void flog(int priority, const char *format, ...) {
     va_list ap;
 
     va_start(ap, format);
@@ -158,7 +148,7 @@ static void chld_handler(int signum) {
 static void unreg_watches() {
     if (inotfd != -1) {
         /* ignore errors due to automatically removed watches (IN_IGNORED) */
-        if (inotqwd != -1  &&  inotify_rm_watch(inotfd, inotqwd) == -1  &&  errno != EINVAL)
+        if (inotqwd != -1   &&  inotify_rm_watch(inotfd, inotqwd)  == -1  &&  errno != EINVAL)
             error();
         else
             inotqwd = -1;
@@ -216,7 +206,7 @@ static int try_reg_watches(const char *qpath, const char *rqpath) {
     unreg_watches();
 
     /* try to quickly open a fd (expect read access on qpath) */
-    if ((mpfd = open(qpath, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_NONBLOCK)) == -1)
+    if ((mpfd = open(qpath, O_RDONLY | O_NONBLOCK)) == -1)
         flog(LOG_NOTICE, "failed to pin %s, waiting...", qpath);
 
     else if (lstat(qpath, &st) == -1  ||  !S_ISDIR(st.st_mode))
@@ -303,10 +293,19 @@ static void set_signals() {
     if (sigaction(SIGINT,  &sa, NULL) == -1  ||  sigaction(SIGTERM, &sa, NULL) == -1)
         error();
 
+
     sa.sa_handler  = chld_handler;
     sa.sa_flags    = SA_RESTART;
 
     if (sigaction(SIGCHLD, &sa, NULL) == -1)
+        error();
+
+
+    /* ignore SIGPIPE, as recommended for libmicrohttpd */
+    sigemptyset(&sa.sa_mask);
+    sa.sa_handler  = SIG_IGN;
+
+    if (sigaction(SIGPIPE, &sa, NULL) == -1)
         error();
 }
 
@@ -456,7 +455,7 @@ static void retry_dir(const char *qtype, const char *qpath, const char *looppath
 
 
 /* allocate buffer for environment variable + suffix */
-char* alloc_env(const char *var, const char *suffix) {
+static char* alloc_env(const char *var, const char *suffix) {
     const char *value;
     char       *buf;
     size_t     varlen;
@@ -481,7 +480,7 @@ char* alloc_env(const char *var, const char *suffix) {
 int main() {
     /* using FILENAME_MAX prevents EINVAL on read() */
     char   buf[sizeof(struct inotify_event) + FILENAME_MAX+1];
-    char   *qpath, *rqpath, *looppath;
+    char   *crtpath, *qpath, *rqpath, *looppath, *lsthost, *lstport;
     int    sz, offset, rereg, evqok = 0;
     struct inotify_event *iev;
     double retrytmout, lastclock;
@@ -492,7 +491,7 @@ int main() {
     /* init logging */
     syslog_init();
 
-    /* set INT/TERM handler */
+    /* install INT/TERM/CHLD handlers and ignore PIPE */
     set_signals();
 
     /* become one's own process group (EPERM if session leader) */
@@ -501,19 +500,37 @@ int main() {
         error();
     */
 
+    /* extract environment */
+    crtpath  = alloc_env(CABLE_CERTS,  "/" CERTS_NAME);
+    qpath    = alloc_env(CABLE_QUEUES, "/" QUEUE_NAME);
+    rqpath   = alloc_env(CABLE_QUEUES, "/" RQUEUE_NAME);
+    looppath = alloc_env(CABLE_HOME,   "/" LOOP_NAME);
+    lsthost  = alloc_env(CABLE_HOST,   "");
+    lstport  = alloc_env(CABLE_PORT,   "");
+
+
     /* initialize rng */
     rand_init();
 
 
-    /* extract environment */
-    qpath    = alloc_env(CABLE_QUEUES, "/" QUEUE_NAME);
-    rqpath   = alloc_env(CABLE_QUEUES, "/" RQUEUE_NAME);
-    looppath = alloc_env(CABLE_HOME,   "/" LOOP_NAME);
+    /* initialize webserver */
+    if (!init_server(crtpath, qpath, rqpath, lsthost, lstport)) {
+        flog(LOG_ERR, "failed to initialize webserver");
+        exit(EXIT_FAILURE);
+    }
 
 
     /* try to reregister watches as long as no signal caught */
     lastclock = getmontime();
     while (!stop) {
+        /* support empty CABLE_NOLOOP when testing, to act as pure server */
+#ifdef TESTING
+        if (getenv("CABLE_NOLOOP")) {
+            sleepsec(RETRY_TMOUT);
+            continue;
+        }
+#endif
+
         wait_reg_watches(qpath, rqpath);
 
         /* read events as long as no signal caught and no unmount / move_self / etc. events read */
@@ -576,9 +593,17 @@ int main() {
     unreg_watches();
 
 
+    /* initialize webserver */
+    if (!shutdown_server())
+        flog(LOG_WARNING, "failed to shutdown webserver");
+
+
+    free(lstport);
+    free(lsthost);
     free(looppath);
     free(rqpath);
     free(qpath);
+    free(crtpath);
 
     flog(LOG_INFO, "exiting");
     closelog();

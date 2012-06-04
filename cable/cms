@@ -98,13 +98,13 @@ keysdir="${ssldir}"/private
 #
 # <peer>
 #
-#     out: derive.pem, rpeer.sig
+#     out: derive.pem, rpeer.sig[atomic]
 #
 # <--- rpeer.sig
 #
 # <send>
 #     in:  message, username, {ca,verify}.pem, rpeer.sig
-#     out: speer.sig, message.enc, {send,recv,ack}.mac
+#     out: speer.sig[atomic], message.enc[atomic], {send,recv,ack}.mac
 #
 # ---> speer.sig, message.enc, send.mac
 #
@@ -119,7 +119,8 @@ keysdir="${ssldir}"/private
 # ---> ack.mac
 case ${cmd} in
 peer)
-    rm -f -- "${msgdir}"/derive.pem "${msgdir}"/rpeer.der "${msgdir}"/rpeer.sig
+    rm -f -- "${msgdir}"/derive.pem "${msgdir}"/rpeer.der "${msgdir}"/rpeer.sig \
+             "${msgdir}"/rpeer.sig.tmp
 
     # generate ephemeral peer key
     openssl genpkey -paramfile "${modp18}" \
@@ -134,7 +135,8 @@ peer)
                 -signer   "${certdir}"/verify.pem \
                 -inkey    "${keysdir}"/sign.pem   \
                 -in       "${msgdir}"/rpeer.der   \
-                -out      "${msgdir}"/rpeer.sig
+                -out      "${msgdir}"/rpeer.sig.tmp
+    mv -- "${msgdir}"/rpeer.sig.tmp "${msgdir}"/rpeer.sig
 
     rm -- "${msgdir}"/rpeer.der
     ;;
@@ -143,7 +145,8 @@ peer)
 send)
     rm -f -- "${msgdir}"/derive.pem "${msgdir}"/speer.der  "${msgdir}"/rpeer.der   \
              "${msgdir}"/speer.sig  "${msgdir}"/shared.key "${msgdir}"/message.enc \
-             "${msgdir}"/send.mac   "${msgdir}"/recv.mac   "${msgdir}"/ack.mac
+             "${msgdir}"/send.mac   "${msgdir}"/recv.mac   "${msgdir}"/ack.mac     \
+             "${msgdir}"/speer.sig.tmp "${msgdir}"/message.enc.tmp
 
     # verify certificates chain
     verify_certs "${msgdir}"
@@ -175,7 +178,9 @@ send)
                 -signer   "${certdir}"/verify.pem \
                 -inkey    "${keysdir}"/sign.pem   \
                 -in       "${msgdir}"/speer.der   \
-                -out      "${msgdir}"/speer.sig
+                -out      "${msgdir}"/speer.sig.tmp
+    mv -- "${msgdir}"/speer.sig.tmp "${msgdir}"/speer.sig
+
 
     # deterministically derive encryption and MAC keys from shared secret
     enckey=`openssl dgst -mac hmac -${enchash} -macopt key:encrypt "${msgdir}"/shared.key | cut -d' ' -f2`
@@ -204,7 +209,8 @@ send)
     openssl cms -EncryptedData_encrypt -binary -${encalg} -outform pem \
                 -secretkey ${enckey}               \
                 -in        "${msgdir}"/message     \
-                -out       "${msgdir}"/message.enc
+                -out       "${msgdir}"/message.enc.tmp
+    mv -- "${msgdir}"/message.enc.tmp "${msgdir}"/message.enc
 
     rm -- "${msgdir}"/derive.pem "${msgdir}"/speer.der "${msgdir}"/rpeer.der \
           "${msgdir}"/shared.key

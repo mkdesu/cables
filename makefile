@@ -1,10 +1,11 @@
 # Single-source file programs to build
-progs   = cable/daemon cable/service cable/mhdrop cable/hex2base32 \
+progs   = cable/daemon cable/mhdrop cable/hex2base32 \
           cable/eeppriv.jar
+objextra_daemon = obj/server.o obj/service.o
+ldextra_daemon  = -lrt -lmicrohttpd
 cpextra_EepPriv = /opt/i2p/lib/i2p.jar
-ldextra_daemon  = -lrt
 
-title  := $(shell grep -o 'LIBERTE CABLE [[:alnum:]._-]\+' src/service.c)
+title  := $(shell grep -o 'LIBERTE CABLE [[:alnum:]._-]\+' src/daemon.h)
 
 
 # Installation directories (override DESTDIR and/or PREFIX)
@@ -22,9 +23,9 @@ CC      = gcc
 JAVAC   = javac
 
 # Modifications to compiler flags
-CFLAGS += -std=c99 -Wall -pedantic
-JFLAGS += -target 1.5 -deprecation -Werror -g:none
-JLIBS  := $(subst : ,:,$(patsubst %,%:,$(wildcard lib/*.jar)))
+CFLAGS := -std=c99 -Wall -pedantic -MMD -D_FILE_OFFSET_BITS=64 -D_POSIX_C_SOURCE=200809L -D_BSD_SOURCE -DNDEBUG $(CFLAGS)
+JFLAGS := -target 1.5 -deprecation -Werror -g:none $(JFLAGS)
+JLIBS   = $(subst : ,:,$(addsuffix :,$(wildcard lib/*.jar)))
 
 
 # Build rules
@@ -35,10 +36,10 @@ JLIBS  := $(subst : ,:,$(patsubst %,%:,$(wildcard lib/*.jar)))
 all: $(progs)
 
 clean:
-	$(RM) -r $(progs) obj/* stage
+	$(RM) -r $(progs) obj/*
 
-bin/% cable/%: obj/%.o
-	$(CC) -o $@ $(CFLAGS) $< $(LDFLAGS) $(ldextra_$*) 
+cable/%: obj/%.o
+	$(CC) -o $@ $(CFLAGS) $< $(objextra_$*) $(LDFLAGS) $(ldextra_$*)
 
 obj/%.o: src/%.c
 	$(CC) -c -o $@ $(CFLAGS) $<
@@ -60,10 +61,15 @@ install: all
 	install        -t $(instdir)/libexec/cable      cable/*
 	install -m 644 -t $(instdir)/share/applications $(wildcard share/*.desktop)
 	-chmod a-x $(instdir)/libexec/cable/eeppriv.jar
-	sed -i     's&/usr/libexec/cable\>&$(PREFIX)/libexec/cable&g'        \
-	           $(patsubst %,$(etcdir)/cable/%,profile cabled nginx.conf) \
+	sed -i     's&/usr/libexec/cable\>&$(PREFIX)/libexec/cable&g' \
+	           $(addprefix $(etcdir)/cable/,profile cabled)       \
 	           $(instdir)/bin/cable-send
-	sed -i     's&/etc/cable\>&$(ETCPREFIX)/cable&g'                \
-	           $(etcdir)/cable/profile                              \
-	           $(patsubst %,$(instdir)/libexec/cable/%,cabled send) \
-	           $(patsubst %,$(instdir)/bin/%,cable-id cable-ping cable-send gen-cable-username gen-tor-hostname gen-i2p-hostname)
+	sed -i     's&/etc/cable\>&$(ETCPREFIX)/cable&g'              \
+	           $(etcdir)/cable/profile                            \
+	           $(addprefix $(instdir)/libexec/cable/,cabled send) \
+	           $(addprefix $(instdir)/bin/,cable-id cable-ping cable-send gen-cable-username gen-tor-hostname gen-i2p-hostname)
+
+
+# File-specific dependencies
+cable/daemon:  $(objextra_daemon)
+-include $(wildcard obj/*.d)

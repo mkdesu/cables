@@ -1,7 +1,7 @@
 #!/bin/sh -e
 
 if [ $# != 2 ]; then
-    echo "Format: $0 send|peer|recv|ack|fin <msgid>"
+    echo "Format: $0 send|recv|ack|fin <msgid>"
     exit 1
 fi
 
@@ -10,8 +10,6 @@ fi
 username=`cat ${CABLE_CERTS}/certs/username | tr -cd a-z2-7`
 queue=${CABLE_QUEUES}/queue
 rqueue=${CABLE_QUEUES}/rqueue
-pubqueue=${CABLE_PUB}/"${username}"/queue
-pubrqueue=${CABLE_PUB}/"${username}"/rqueue
 
 # Parameters
 cmd="$1"
@@ -35,23 +33,6 @@ urlprefix() {
 }
 
 
-# Atomic no-clobber copy
-atomicnccopy() {
-    local src="$1" dst="$2"
-
-    if [ ! -e "${dst}" ]; then
-        # prevent race condition in possible implementations of max retry-num
-        if cp -T "${src}" "${dst}".new && [ -e "${src}" ]; then
-            chmod 640 "${dst}".new
-            mv -T "${dst}".new "${dst}"
-        else
-            rm -f "${dst}".new
-            error "failed to copy ${src}"
-        fi
-    fi
-}
-
-
 # MAC key extractor
 getmac() {
     local src="$1" mac=
@@ -66,8 +47,6 @@ getmac() {
 # Sanity checks
 [ ${#msgid}    = 40 ] || error "bad msgid"
 [ ${#username} = 32 ] || error "bad own username"
-[ -e "${pubqueue}"  ] || error "public queue does not exist"
-[ -e "${pubrqueue}" ] || error "public rqueue does not exist"
 
 check_userhost() {
     [ ${#1} = 32 ] || error "bad username"
@@ -80,10 +59,6 @@ send)
     # <send> [comm loop]
     if [ -e ${queue}/"${msgid}"/${cmd}.ok  -a  ! -e ${queue}/"${msgid}"/ack.ok ]; then
         prefix=`urlprefix ${queue}`
-
-        atomicnccopy ${queue}/"${msgid}"/speer.sig    "${pubqueue}"/"${msgid}".key
-        atomicnccopy ${queue}/"${msgid}"/message.enc  "${pubqueue}"/"${msgid}"
-
         sendmac=`getmac ${queue}/"${msgid}"/send.mac`
         curl -sSfg "${prefix}"/snd/"${msgid}"/"${sendmac}"
     else
@@ -91,20 +66,11 @@ send)
     fi
     ;;
 
-peer)
-    # <peer> [comm loop]
-    if [ -e ${rqueue}/"${msgid}"/${cmd}.ok  -a  ! -e ${rqueue}/"${msgid}"/recv.ok ]; then
-        atomicnccopy ${rqueue}/"${msgid}"/rpeer.sig   "${pubrqueue}"/"${msgid}".key
-    else
-        error "${cmd}.ok not found"
-    fi
-    ;;
-
 recv)
+    # NOTE: dir can be renamed at any moment by <fin>[service]
     # <recv> [comm loop]
     if [ -e ${rqueue}/"${msgid}"/${cmd}.ok ]; then
         prefix=`urlprefix ${rqueue}`
-
         recvmac=`getmac ${rqueue}/"${msgid}"/recv.mac`
         curl -sSfg "${prefix}"/rcp/"${msgid}"/"${recvmac}"
     else
@@ -116,19 +82,14 @@ ack)
     # <ack> [comm loop]
     if [ -e ${queue}/"${msgid}"/${cmd}.ok ]; then
         prefix=`urlprefix ${queue}`
-
-        rm -f "${pubqueue}"/"${msgid}" "${pubqueue}"/"${msgid}".key
-
         ackmac=`getmac ${queue}/"${msgid}"/ack.mac`
         curl -sSfg "${prefix}"/ack/"${msgid}"/"${ackmac}"
 
         mv -T ${queue}/"${msgid}" ${queue}/"${msgid}".del
 
         # try to run 2nd ack variant immediately
-        # rm -f "${pubqueue}"/"${msgid}"
         # rm -r --one-file-system ${queue}/"${msgid}".del
     elif [ -e ${queue}/"${msgid}".del ]; then
-        rm -f "${pubqueue}"/"${msgid}" "${pubqueue}"/"${msgid}".key
         rm -r --one-file-system ${queue}/"${msgid}".del
     else
         error "${cmd}.ok or .del directory not found"
@@ -138,7 +99,6 @@ ack)
 fin)
     # <fin> [comm loop]
     if [ -e ${rqueue}/"${msgid}".del ]; then
-        rm -f "${pubrqueue}"/"${msgid}".key
         rm -r --one-file-system ${rqueue}/"${msgid}".del
     else
         error ".del directory not found"

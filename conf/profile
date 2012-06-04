@@ -21,22 +21,24 @@ export CABLE_TOR=${CABLE_MOUNT}/security/tor
 export CABLE_I2P=${CABLE_MOUNT}/security/i2p
 
 # CABLE_QUEUES/(r)queue directories, must be writable by uid 'cable'
-# Value must be mirrored in /etc/conf.d/spawn-fcgi.cable
 export CABLE_QUEUES=${CABLE_MOUNT}/cables
 
 # Mail delivery directory, must be writable by uid 'cable'
 export CABLE_INBOX=${CABLE_MOUNT}/mail/inbox
 
-# CABLE_PUB/<username>/(r)queue directories, must be writable by uid 'cable'
-# CABLE_PUB/<username>/{certs,(r)queue} must be readable by nginx
-# Value must be mirrored in /etc/nginx/nginx.conf: "root" directive
-export CABLE_PUB=/srv/www
-
-# Supported email-like IDs
-export CABLE_REGEX='[a-z2-7]{32}@([a-z2-7]{16}\.onion|[a-z2-7]{52}\.b32\.i2p)'
 
 # Message or receipt timeout in seconds (e.g., 7 days)
 export CABLE_TMOUT=$((7 * 24 * 60 * 60))
+
+
+# Host and port on which cables daemon listens to HTTP connections
+# (symbolic names can be used; leave host empty for wildcard bind)
+export CABLE_HOST=127.0.0.1
+export CABLE_PORT=9080
+
+
+# Supported email-like IDs (do not modify!)
+export CABLE_REGEX='[a-z2-7]{32}@([a-z2-7]{16}\.onion|[a-z2-7]{52}\.b32\.i2p)'
 
 
 # OpenSSL random seed
