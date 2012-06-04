@@ -238,9 +238,9 @@ csexec /request/msg/${mid1}/${host2}/${user1} | wsgrep VEROK
 csexec /request/snd/${mid1}/${mac1} | wsgrep 500
 [ ! -e ${root}/user1/queues/rqueue/${mid1}/send.mac ]
 
-# simultaneous snd request (mid1, mac1) [skip if locked]
+# simultaneous snd request (mid1, mac1) [fail if locked]
 touch ${root}/user1/queues/rqueue/${mid1}/peer.ok
-csexec /request/snd/${mid1}/${mac1} lock ${root}/user1/queues/rqueue/${mid1}/ | wsgrep VEROK
+csexec /request/snd/${mid1}/${mac1} lock ${root}/user1/queues/rqueue/${mid1}/ | wsgrep 500
 [ ! -e ${root}/user1/queues/rqueue/${mid1}/send.mac ]
 [ ! -e ${root}/user1/queues/rqueue/${mid1}/recv.req ]
 
@@ -260,9 +260,9 @@ echo ${mac1} > ${root}/user1/queues/queue/${mid2}/recv.mac
 csexec /request/rcp/${mid2}/${mac1} | wsgrep 500
 [ ! -e ${root}/user1/queues/queue/${mid2}/ack.req ]
 
-# simultaneous rcp request (mid2, mac1) [skip if locked]
+# simultaneous rcp request (mid2, mac1) [fail if locked]
 touch ${root}/user1/queues/queue/${mid2}/send.ok
-csexec /request/rcp/${mid2}/${mac1} lock ${root}/user1/queues/queue/${mid2}/ | wsgrep VEROK
+csexec /request/rcp/${mid2}/${mac1} lock ${root}/user1/queues/queue/${mid2}/ | wsgrep 500
 [ ! -e ${root}/user1/queues/queue/${mid2}/ack.req ]
 
 # rcp request (mid2, mac1)
@@ -281,14 +281,13 @@ echo ${mac1} > ${root}/user1/queues/rqueue/${mid1}/ack.mac
 csexec /request/ack/${mid1}/${mac1} | wsgrep 500
 [ -e ${root}/user1/queues/rqueue/${mid1} ]
 
-# ack request (mid1, mac1)
+# simultaneous ack request (mid1, mac1) [fail if locked]
 touch ${root}/user1/queues/rqueue/${mid1}/recv.ok
-csexec /request/ack/${mid1}/${mac1} | wsgrep VEROK
-[ -e ${root}/user1/queues/rqueue/${mid1}.del ]
+csexec /request/ack/${mid1}/${mac1} lock ${root}/user1/queues/rqueue/${mid1}/ | wsgrep 500
+[ -e ${root}/user1/queues/rqueue/${mid1} ]
 
-# simultaneous ack request (mid1, mac1) [ok if locked]
-mv -T ${root}/user1/queues/rqueue/${mid1}{.del,}
-csexec /request/ack/${mid1}/${mac1} lock ${root}/user1/queues/rqueue/${mid1}/ | wsgrep VEROK
+# ack request (mid1, mac1)
+csexec /request/ack/${mid1}/${mac1} | wsgrep VEROK
 [ -e ${root}/user1/queues/rqueue/${mid1}.del ]
 
 # incorrect ack request (mid1, mac2) [compare ack.mac]

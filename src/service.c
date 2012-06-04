@@ -184,26 +184,24 @@ static int handle_snd(const char *msgid, const char *mac, int cqdir) {
 
     /* base: .../cables/rqueue/<msgid> */
     if ((msgdir = openat(cqdir, msgid, O_RDONLY)) != -1) {
-        /* lock base (skip if locked) */
-        if (!try_lock(msgdir))
-            res = (errno == EWOULDBLOCK);
-
-        /* check peer.ok */
-        else if (check_file(msgdir, "peer.ok")) {
+        if (/* lock base */
+               try_lock(msgdir)
+            /* check peer.ok */
+            && check_file(msgdir, "peer.ok")
             /* write send.mac (skip if exists) */
-            if (check_file(msgdir, "send.mac")
-                || (errno == ENOENT  &&  write_line(msgdir, "send.mac", mac))) {
-                /* create recv.req (atomic, ok if exists) */
-                if (linkat(msgdir, "peer.ok", msgdir, "recv.req", 0))
-                    res = (errno == EEXIST);
-                else
-                    res =
-                        /* unlock base (touch triggers loop's lock) */
-                           !flock(msgdir, LOCK_UN)
-                        /* touch /cables/rqueue/<msgid>/ (if recv.req didn't exist) */
-                        /* euid owns msgdir, so O_RDWR is not needed */
-                        && !futimens(msgdir, NULL);
-            }
+            && (check_file(msgdir, "send.mac")
+                || (errno == ENOENT  &&  write_line(msgdir, "send.mac", mac)))) {
+
+            /* create recv.req (atomic, ok if exists) */
+            if (linkat(msgdir, "peer.ok", msgdir, "recv.req", 0))
+                res = (errno == EEXIST);
+            else
+                res =
+                    /* unlock base (touch triggers loop's lock) */
+                       !flock(msgdir, LOCK_UN)
+                    /* touch /cables/rqueue/<msgid>/ (if recv.req didn't exist) */
+                    /* euid owns msgdir, so O_RDWR is not needed */
+                    && !futimens(msgdir, NULL);
         }
 
         /* close base (and unlock if locked) */
@@ -221,23 +219,22 @@ static int handle_rcp(const char *msgid, const char *mac, int cqdir) {
 
     /* base: .../cables/queue/<msgid> */
     if ((msgdir = openat(cqdir, msgid, O_RDONLY)) != -1) {
-        /* lock base (skip if locked) */
-        if (!try_lock(msgdir))
-            res = (errno == EWOULDBLOCK);
+        if (/* lock base */
+               try_lock(msgdir)
+            /* check send.ok */
+            && check_file(msgdir, "send.ok")
+            /* read recv.mac */
+            && read_line(msgdir, "recv.mac", exmac, sizeof(exmac))
+            /* compare <recvmac> <-> recv.mac */
+            && !strcmp(mac, exmac)) {
 
-        /* check send.ok */
-        /* read recv.mac */
-        /* compare <recvmac> <-> recv.mac */
-        else if (check_file(msgdir, "send.ok")
-                 && read_line(msgdir, "recv.mac", exmac, sizeof(exmac))
-                 && !strcmp(mac, exmac)) {
             /* create ack.req (atomic, ok if exists) */
             if (linkat(msgdir, "send.ok", msgdir, "ack.req", 0))
                 res = (errno == EEXIST);
             else
                 res =
                     /* unlock base (touch triggers loop's lock) */
-                       !flock(msgdir, LOCK_UN)
+                    !flock(msgdir, LOCK_UN)
                     /* touch /cables/queue/<msgid>/ (if ack.req didn't exist) */
                     /* euid owns msgdir, so O_RDWR is not needed */
                     && !futimens(msgdir, NULL);
@@ -258,27 +255,23 @@ static int handle_ack(const char *msgid, const char *mac, int cqdir) {
 
     /* base: .../cables/rqueue/<msgid> */
     if ((msgdir = openat(cqdir, msgid, O_RDONLY)) != -1) {
-        /* lock base (ok if locked) */
-        if (try_lock(msgdir)  ||  (errno == EWOULDBLOCK))
-            res =
-                /* check recv.ok */
-                   check_file(msgdir, "recv.ok")
-                /* read ack.mac */
-                && read_line(msgdir, "ack.mac", exmac, sizeof(exmac))
-                /* compare <ackmac> <-> ack.mac */
-                && !strcmp(mac, exmac);
-
-        /* close base (and unlock if locked) */
-        if (close(msgdir))
-            res = 0;
-    }
-
-    /* rename .../cables/rqueue/<msgid> -> <msgid>.del */
-    if (res) {
         strncpy(msgiddel, msgid, MSGID_LENGTH);
         strcpy(msgiddel + MSGID_LENGTH, ".del");
 
-        if (renameat(cqdir, msgid, cqdir, msgiddel))
+        res =
+            /* lock base */
+               try_lock(msgdir)
+            /* check recv.ok */
+            && check_file(msgdir, "recv.ok")
+            /* read ack.mac */
+            && read_line(msgdir, "ack.mac", exmac, sizeof(exmac))
+            /* compare <ackmac> <-> ack.mac */
+            && !strcmp(mac, exmac)
+            /* rename .../cables/rqueue/<msgid> -> <msgid>.del */
+            && !renameat(cqdir, msgid, cqdir, msgiddel);
+
+        /* close base (and unlock if locked) */
+        if (close(msgdir))
             res = 0;
     }
 
