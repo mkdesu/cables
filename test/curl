@@ -30,6 +30,7 @@ if [ "x ${params}" = "$(echo x "$@")" ]; then
     exit 22
 fi
 
+# sleep 0.$((RANDOM * 99 / 32767))
 
 eval set -- "${params}"
 exec /usr/bin/curl "$@"

@@ -234,7 +234,7 @@ static int handle_rcp(const char *msgid, const char *mac, int cqdir) {
             else
                 res =
                     /* unlock base (touch triggers loop's lock) */
-                    !flock(msgdir, LOCK_UN)
+                       !flock(msgdir, LOCK_UN)
                     /* touch /cables/queue/<msgid>/ (if ack.req didn't exist) */
                     /* euid owns msgdir, so O_RDWR is not needed */
                     && !futimens(msgdir, NULL);

@@ -366,7 +366,7 @@ wait ${killpid1} ${killpid2} || :
 killpid1= killpid2=
 
 
-sinfo "Testing daemon operation"
+sinfo "Testing non-inotify daemon operation"
 ccdaemon() {
     local pid1= pid2= chkdir=
 
@@ -388,10 +388,20 @@ ccdaemon() {
     fi
 }
 
+# tests lock starvation
+ccsend 1 "Tor1 -> I2P1 (self-daemon)"  ${u1user}@${u1tor} ${u1user}@${u1i2p}
+ccsend 2 "I2P2 -> Tor2 (self-daemon)"  ${u2user}@${u2i2p} ${u2user}@${u2tor}
+CABLE_NOWATCH=1 ccdaemon
+
+
+sinfo "Testing daemon operation"
+
 ccsend 1 "Tor1 -> Tor2, I2P2 (daemon)" ${u1user}@${u1tor} ${u2user}@${u2tor} ${u2user}@${u2i2p}
 ccsend 1 "I2P1 -> Tor2, I2P2 (daemon)" ${u1user}@${u1i2p} ${u2user}@${u2tor} ${u2user}@${u2i2p}
 ccsend 2 "Tor2 -> Tor1, I2P1 (daemon)" ${u2user}@${u2tor} ${u1user}@${u1tor} ${u1user}@${u1i2p}
 ccsend 2 "I2P2 -> Tor1, I2P1 (daemon)" ${u2user}@${u2i2p} ${u1user}@${u1tor} ${u1user}@${u1i2p}
+ccsend 1 "Tor1 -> Tor1, I2P1 (daemon)" ${u1user}@${u1tor} ${u1user}@${u1tor} ${u1user}@${u1i2p}
+ccsend 2 "I2P2 -> Tor2, I2P2 (daemon)" ${u2user}@${u2i2p} ${u2user}@${u2tor} ${u2user}@${u2i2p}
 
 # stale temporary directories removal
 faketmp=`mktemp -d --tmpdir=${root}/user1/queues/queue`

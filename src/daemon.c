@@ -1,6 +1,9 @@
 /*
   The following environment variables are used (from /etc/cable/profile):
   CABLE_HOME, CABLE_QUEUES, CABLE_CERTS, CABLE_HOST, CABLE_PORT
+
+  Testing environment:
+  CABLE_NOLOOP, CABLE_NOWATCH
  */
 
 #include <unistd.h>
@@ -48,7 +51,7 @@
   wait time for too many processes can be long, since SIGCHLD interrupts sleep
 */
 #ifndef TESTING
-#define RETRY_TMOUT 300
+#define RETRY_TMOUT 150
 #define MAX_PROC    100
 #define WAIT_PROC   300
 #else
@@ -175,6 +178,11 @@ static int reg_watches(const char *qpath, const char *rqpath) {
     /* don't block on read(), since select() is used for polling */
     if (inotfd == -1  &&  (inotfd = inotify_init1(IN_NONBLOCK)) == -1)
         error();
+
+#ifdef TESTING
+    if (getenv("CABLE_NOWATCH"))
+        return 1;
+#endif
 
     /* existing watch is ok */
     if ((inotqwd  = inotify_add_watch(inotfd, qpath,  IN_ATTRIB | IN_MOVED_TO | IN_MOVE_SELF | IN_DONT_FOLLOW | IN_ONLYDIR)) == -1) {
@@ -420,6 +428,8 @@ static void retry_dir(const char *qtype, const char *qpath, const char *looppath
     DIR    *qdir;
     int    fd, run, rdres;
 
+    flog(LOG_DEBUG, "retrying %s directories", qtype);
+
     /* open directory */
     if ((qdir = opendir(qpath)) == NULL)
         warning();
@@ -481,7 +491,7 @@ int main() {
     /* using FILENAME_MAX prevents EINVAL on read() */
     char   buf[sizeof(struct inotify_event) + FILENAME_MAX+1];
     char   *crtpath, *qpath, *rqpath, *looppath, *lsthost, *lstport;
-    int    sz, offset, rereg, evqok = 0;
+    int    sz, offset, rereg, evqok = 0, retryid = 0;
     struct inotify_event *iev;
     double retrytmout, lastclock;
 
@@ -572,10 +582,11 @@ int main() {
               if sufficient time passed since last retries, retry again
             */
             if (!stop  &&  getmontime() - lastclock >= retrytmout) {
-                flog(LOG_DEBUG, "retrying queue directories");
-
-                retry_dir(QUEUE_NAME,  qpath,  looppath);
-                retry_dir(RQUEUE_NAME, rqpath, looppath);
+                /* alternate between queue dirs to prevent lock starvation on self-send */
+                if ((retryid ^= 1))
+                    retry_dir(QUEUE_NAME,  qpath,  looppath);
+                else
+                    retry_dir(RQUEUE_NAME, rqpath, looppath);
 
                 lastclock = getmontime();
 
