@@ -224,9 +224,9 @@ csexec /request/msg/${mid1}/${host1}/${user1} | wsgrep VEROK
 # repeated msg request (mid1, host1, user1) [ok and skip if exists]
 csexec /request/msg/${mid1}/${host1}/${user1} | wsgrep VEROK
 
-# simultaneous msg request (mid1, host2, user1) [skip if locked]
+# simultaneous msg request (mid1, host2, user1)
 mv ${root}/user1/queues/rqueue/${mid1}{,.new}
-csexec /request/msg/${mid1}/${host2}/${user1} lock ${root}/user1/queues/rqueue/${mid1}.new/ | wsgrep VEROK
+csexec /request/msg/${mid1}/${host2}/${user1} lock ${root}/user1/queues/rqueue/${mid1}.new/ | wsgrep 500
 [ "`cat ${root}/user1/queues/rqueue/${mid1}.new/hostname`" = ${host1} ]
 
 # repeated msg request after failed msg (mid1, host2, user1)

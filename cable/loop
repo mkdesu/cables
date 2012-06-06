@@ -20,7 +20,7 @@ msgid="${2%.del}"
 dirid="${2}"
 
 lockmagick="$3"
-locktmout=30
+locktmout=2
 
 # Directories
 msgdir=${CABLE_QUEUES}/${qtype}/"${dirid}"
@@ -64,9 +64,9 @@ else
 
     if [ ${qtype} = queue ]; then
 
-        # non-blocking lock of combined operations
+        # lock combined operations
         if [ lockmagick != "${lockmagick}" ]; then
-            exec flock -n "${msgdir}"/ "$0" ${qtype} "${msgid}" lockmagick
+            exec flock -w ${locktmout} -n "${msgdir}"/ "$0" ${qtype} "${msgid}" lockmagick
         fi
 
         "${validate}" ${qtype} "${msgid}"
@@ -100,9 +100,9 @@ else
 
     else
 
-        # non-blocking lock of combined operations
+        # lock combined operations
         if [ lockmagick != "${lockmagick}" ]; then
-            exec flock -n "${msgdir}"/ "$0" ${qtype} "${msgid}" lockmagick
+            exec flock -w ${locktmout} -n "${msgdir}"/ "$0" ${qtype} "${msgid}" lockmagick
         fi
 
         "${validate}" ${qtype} "${msgid}"

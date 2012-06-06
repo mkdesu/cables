@@ -137,7 +137,7 @@ static int try_lock(int fd) {
 
 static int handle_msg(const char *msgid, const char *hostname,
                        const char *username, int cqdir) {
-    int  res = 0, dorename = 0, msgdir;
+    int  res = 0, msgdir;
     char msgidnew[MSGID_LENGTH+4+1];
 
     /* checkno /cables/rqueue/<msgid> (ok and skip if exists) */
@@ -152,25 +152,21 @@ static int handle_msg(const char *msgid, const char *hostname,
         /* create directory (ok if exists) */
         if (!mkdirat(cqdir, msgidnew, DCREAT_MODE)  ||  errno == EEXIST) {
             if ((msgdir = openat(cqdir, msgidnew, O_RDONLY)) != -1) {
-                /* lock temp base (skip if locked) */
-                if (!try_lock(msgdir))
-                    res = (errno == EWOULDBLOCK);
+                res =
+                    /* lock temp base */
+                       try_lock(msgdir)
+                    /* write hostname */
+                    && write_line(msgdir, "hostname", hostname)
+                    /* write username */
+                    && write_line(msgdir, "username", username)
+                    /* create peer.req */
+                    && create_file(msgdir, "peer.req")
+                    /* rename .../cables/rqueue/<msgid>.new -> <msgid> */
+                    && !renameat(cqdir, msgidnew, cqdir, msgid);
 
-                else
-                    /* write hostname, username, and create peer.req */
-                    res = dorename =
-                           write_line(msgdir, "hostname", hostname)
-                        && write_line(msgdir, "username", username)
-                        && create_file(msgdir, "peer.req");
-
-                /* unlock and close temp base (rename triggers loop's lock) */
+                /* close base (and unlock if locked) */
                 if (close(msgdir))
                     res = 0;
-
-                /* rename .../cables/rqueue/<msgid>.new -> <msgid> */
-                if (res && dorename)
-                    if (renameat(cqdir, msgidnew, cqdir, msgid))
-                        res = 0;
             }
         }
     }
