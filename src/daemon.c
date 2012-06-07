@@ -13,10 +13,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <time.h>
 #include <signal.h>
-#include <stdarg.h>
-#include <syslog.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/file.h>
@@ -25,6 +22,8 @@
 #include <sys/select.h>
 
 #include "daemon.h"
+#include "server.h"
+#include "util.h"
 
 
 /* environment variables */
@@ -69,29 +68,6 @@ static volatile int stop = 0;
 
 /* process counters */
 static volatile long pstarted = 0, pfinished = 0;
-
-
-/* logging init */
-static void syslog_init() {
-    openlog("cable", LOG_PID, LOG_MAIL);
-}
-
-/* logging */
-void flog(int priority, const char *format, ...) {
-    va_list ap;
-
-    va_start(ap, format);
-
-#ifndef TESTING
-    vsyslog(priority, format, ap);
-#else
-    fprintf(stderr, "[%d] cable: ", priority);
-    vfprintf(stderr, format, ap);
-    fprintf(stderr, "\n");
-#endif
-
-    va_end(ap);
-}
 
 
 /* non-fatal error */
@@ -234,33 +210,6 @@ static int try_reg_watches(const char *qpath, const char *rqpath) {
 }
 
 
-/*
-  sleep given number of seconds without interferences with SIGALRM
-  do not complete interrupted sleeps to facilitate fast process shutdown
- */
-static void sleepsec(double sec) {
-    struct timespec req, rem;
-
-    /* support negative arguments */
-    if (sec > 0) {
-        req.tv_sec  = (time_t) sec;
-        req.tv_nsec = (long) ((sec - req.tv_sec) * 1e9);
-
-        if (nanosleep(&req, &rem) == -1) {
-            /* try to complete the sleep at most once */
-            if (errno == EINTR) {
-                /*
-                  if (nanosleep(&rem, NULL) == -1  &&  errno != EINTR)
-                  error();
-                */
-            }
-            else
-                error();
-        }
-    }
-}
-
-
 /* retry registering inotify watches, using the retry strategy parameters */
 static void wait_reg_watches(const char *qpath, const char *rqpath) {
     double slp = WAIT_INIT;
@@ -392,34 +341,6 @@ static int wait_read(double sec) {
 }
 
 
-/* initialize rng */
-static void rand_init() {
-    struct timespec tp;
-
-    if (clock_gettime(CLOCK_MONOTONIC, &tp) == -1)
-        error();
-
-    srandom(((unsigned) tp.tv_sec << 29) ^ (unsigned) tp.tv_nsec);
-}
-
-
-/* uniformly distributed value in [-1, 1] */
-static double rand_shift() {
-    return random() / (RAND_MAX / 2.0) - 1;
-}
-
-
-/* get strictly monotonic time (unaffected by ntp/htp) in seconds */
-static double getmontime() {
-    struct timespec tp;
-
-    if (clock_gettime(CLOCK_MONOTONIC, &tp) == -1)
-        error();
-
-    return tp.tv_sec + tp.tv_nsec / 1e9;
-}
-
-
 /* exec run_loop for all correct entries in (r)queue directory */
 static void retry_dir(const char *qtype, const char *qpath, const char *looppath) {
     /* [offsetof(struct dirent, d_name) + fpathconf(fd, _PC_NAME_MAX) + 1] */
@@ -461,29 +382,6 @@ static void retry_dir(const char *qtype, const char *qpath, const char *looppath
     /* close directory if it was successfully opened */
     if (qdir  &&  closedir(qdir) == -1)
         error();
-}
-
-
-/* allocate buffer for environment variable + suffix */
-static char* alloc_env(const char *var, const char *suffix) {
-    const char *value;
-    char       *buf;
-    size_t     varlen;
-
-    value = getenv(var);
-    if (!value) {
-        flog(LOG_ERR, "environment variable %s is not set", var);
-        exit(EXIT_FAILURE);
-    }
-
-    varlen = strlen(value);
-    if (!(buf = (char*) malloc(varlen + strlen(suffix) + 1)))
-        error();
-
-    strncpy(buf, value, varlen);
-    strcpy(buf + varlen, suffix);
-
-    return buf;
 }
 
 

@@ -18,14 +18,15 @@
 #include <microhttpd.h>
 
 #include <string.h>
-#include <stdlib.h>
 #include <stdio.h>
 #include <fcntl.h>
-#include <syslog.h>
 #include <netdb.h>
 #include <sys/stat.h>
 
+#include "server.h"
 #include "daemon.h"
+#include "service.h"
+#include "util.h"
 
 
 /* retry and limit strategies */

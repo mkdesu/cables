@@ -1,5 +1,4 @@
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
@@ -8,7 +7,9 @@
 #include <sys/stat.h>
 #include <sys/file.h>
 
+#include "service.h"
 #include "daemon.h"
+#include "util.h"
 
 
 #define MAX_REQUEST_LENGTH  255
@@ -19,32 +20,6 @@
 
 #define DCREAT_MODE         (S_IRWXU | S_IRWXG | S_IRWXO)
 #define FCREAT_MODE         (S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH)
-
-
-/* lowercase hexadecimal (0-9, a-f) */
-int vfyhex(int sz, const char *s) {
-    if (strlen(s) != sz)
-        return 0;
-
-    for (; *s; ++s)
-        if (!((*s >= '0' && *s <= '9') || (*s >= 'a' && *s <= 'f')))
-            return 0;
-
-    return 1;
-}
-
-
-/* lowercase Base-32 encoding (a-z, 2-7) */
-int vfybase32(int sz, const char *s) {
-    if (strlen(s) != sz)
-        return 0;
-
-    for (; *s; ++s)
-        if (!((*s >= 'a' && *s <= 'z') || (*s >= '2' && *s <= '7')))
-            return 0;
-
-    return 1;
-}
 
 
 /* lowercase hostnames: recognizes .onion and .b32.i2p addresses */
