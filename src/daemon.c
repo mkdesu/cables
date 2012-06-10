@@ -237,39 +237,42 @@ static int wait_read(int fd, double sec) {
 }
 
 
-/* exec run_loop for all correct entries in (r)queue directory */
+/*
+  exec run_loop for all correct entries in (r)queue directory
+  NOT thread-safe, since readdir_r is unreliable with filenames > NAME_MAX
+  (e.g., NTFS + 255 unicode chars get truncated to 256 chars w/o terminating NUL)
+*/
 static void retry_dir(const char *qtype, const char *qpath, const char *looppath) {
     /* [offsetof(struct dirent, d_name) + fpathconf(fd, _PC_NAME_MAX) + 1] */
-    struct dirent de, *deres;
+    struct dirent *de;
     struct stat   st;
     DIR    *qdir;
-    int    fd, run, rdres;
+    int    fd, run;
 
     flog(LOG_DEBUG, "retrying %s directories", qtype);
 
-    /* open directory */
+    /* open directory (O_CLOEXEC is implied) */
     if ((qdir = opendir(qpath))) {
         /* get corresponding file descriptor for stat */
         if ((fd = dirfd(qdir)) != -1) {
-            for (rdres = errno = 0;  !stop_requested()  &&  (rdres = readdir_r(qdir, &de, &deres)) == 0  &&  deres == &de; ) {
+            for (errno = 0;  !stop_requested()  &&  ((de = readdir(qdir))); ) {
                 run = 0;
 
                 /* some filesystems don't support d_type, need to stat entry */
-                if (de.d_type == DT_UNKNOWN  &&  is_msgdir(de.d_name)) {
-                    if (!fstatat(fd, de.d_name, &st, AT_SYMLINK_NOFOLLOW))
+                if (de->d_type == DT_UNKNOWN  &&  is_msgdir(de->d_name)) {
+                    if (!fstatat(fd, de->d_name, &st, AT_SYMLINK_NOFOLLOW))
                         run = S_ISDIR(st.st_mode);
                     else
                         warning("fstat failed");
                 }
                 else
-                    run = (de.d_type == DT_DIR  &&  is_msgdir(de.d_name));
+                    run = (de->d_type == DT_DIR  &&  is_msgdir(de->d_name));
 
                 if (run)
-                    run_loop(qtype, de.d_name, looppath);
+                    run_loop(qtype, de->d_name, looppath);
             }
 
-            /* unclear whether readdir_r sets errno */
-            if (rdres != 0  &&  rdres != EINTR  &&  errno != EINTR)
+            if (errno  &&  errno != EINTR)
                 warning("reading directory failed");
         }
         else
@@ -285,8 +288,8 @@ static void retry_dir(const char *qtype, const char *qpath, const char *looppath
 
 
 int main() {
-    /* using NAME_MAX prevents EINVAL on read() */
-    char   buf[sizeof(struct inotify_event) + NAME_MAX+1];
+    /* using NAME_MAX prevents EINVAL on read() (twice for UTF-16 on NTFS) */
+    char   buf[sizeof(struct inotify_event) + NAME_MAX*2 + 1];
     char   *crtpath, *qpath, *rqpath, *looppath, *lsthost, *lstport;
     int    sz, offset, rereg, evqok, retryid;
     struct inotify_event *iev;
@@ -343,6 +346,7 @@ int main() {
             if (wait_read(inotfd, retrytmout - (getmontime() - lastclock))) {
                 /* read events (non-blocking), taking care to handle interrupts due to signals */
                 if ((sz = read(inotfd, buf, sizeof(buf))) == -1  &&  errno != EINTR) {
+                    /* happens buffer is too small (e.g., NTFS + 255 unicode chars) */
                     warning("error while reading from inotify queue");
                     rereg = 1;
                 }
