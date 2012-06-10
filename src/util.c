@@ -32,6 +32,17 @@ void flog(int priority, const char *format, ...) {
     va_end(ap);
 }
 
+/* non-fatal error */
+void warning(const char *prefix) {
+    flog(LOG_WARNING, "%s: %m", prefix);
+}
+
+/* fatal errors which shouldn't happen in a correct program */
+void error(const char *prefix) {
+    flog(LOG_CRIT, "%s: %m", prefix);
+    exit(EXIT_FAILURE);
+}
+
 
 /* lowercase hexadecimal (0-9, a-f) */
 int vfyhex(int sz, const char *s) {
@@ -65,16 +76,14 @@ char* alloc_env(const char *var, const char *suffix) {
     char       *buf;
     size_t     varlen;
 
-    if (!(value = getenv(var))) {
+    if (!((value = getenv(var)))) {
         flog(LOG_ERR, "environment variable %s is not set", var);
         exit(EXIT_FAILURE);
     }
 
     varlen = strlen(value);
-    if (!(buf = (char*) malloc(varlen + strlen(suffix) + 1))) {
-        flog(LOG_ERR, "malloc failed: %m");
-        exit(EXIT_FAILURE);
-    }
+    if (!((buf = (char*) malloc(varlen + strlen(suffix) + 1))))
+        error("malloc failed");
 
     strncpy(buf, value, varlen);
     strcpy(buf + varlen, suffix);
@@ -82,15 +91,17 @@ char* alloc_env(const char *var, const char *suffix) {
     return buf;
 }
 
+void dealloc_env(char *env) {
+    free(env);
+}
+
 
 /* initialize rng */
-void rand_init() {
+int rand_init() {
     struct timespec tp;
 
-    if (!clock_gettime(CLOCK_MONOTONIC, &tp))
-        srandom(((unsigned) tp.tv_sec << 29) ^ (unsigned) tp.tv_nsec);
-    else
-        flog(LOG_WARNING, "failed to initialize RNG: %m");
+    return !clock_gettime(CLOCK_MONOTONIC, &tp)
+        && (srandom(((unsigned) tp.tv_sec << 29) ^ (unsigned) tp.tv_nsec), 1);
 }
 
 
@@ -104,27 +115,25 @@ double rand_shift() {
 double getmontime() {
     struct timespec tp;
 
-    if (clock_gettime(CLOCK_MONOTONIC, &tp)) {
-        flog(LOG_ERR, "failed to read monotonic clock: %m");
-        exit(EXIT_FAILURE);
-    }
+    if (clock_gettime(CLOCK_MONOTONIC, &tp))
+        error("failed to read monotonic clock");
 
     return tp.tv_sec + tp.tv_nsec / 1e9;
 }
 
 /*
   sleep given number of seconds without interferences with SIGALRM
-  do not complete interrupted sleeps to facilitate fast process shutdown
+  do not complete interrupted sleeps, to facilitate fast process shutdown
  */
 void sleepsec(double sec) {
-    struct timespec req, rem;
+    struct timespec req;
 
     /* support negative arguments */
     if (sec > 0) {
         req.tv_sec  = (time_t) sec;
         req.tv_nsec = (long) ((sec - req.tv_sec) * 1e9);
 
-        if (nanosleep(&req, &rem)  &&  errno != EINTR)
-            flog(LOG_WARNING, "sleep failed: %m");
+        if (nanosleep(&req, NULL)  &&  errno != EINTR)
+            warning("sleep failed");
     }
 }

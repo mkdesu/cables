@@ -49,7 +49,7 @@ static int write_line(int dir, const char *path, const char *s) {
     int  res = 0, fd;
     FILE *file;
 
-    if ((fd = openat(dir, path, O_CREAT | O_WRONLY | O_TRUNC, FCREAT_MODE)) != -1) {
+    if ((fd = openat(dir, path, O_CREAT | O_WRONLY | O_TRUNC | O_CLOEXEC, FCREAT_MODE)) != -1) {
         if ((file = fdopen(fd, "w"))) {
             if (s) {
                 if (fputs(s, file) >= 0  &&  fputc('\n', file) == '\n')
@@ -73,7 +73,7 @@ static int read_line(int dir, const char *path, char *s, int sz) {
     int  res = 0, fd;
     FILE *file;
 
-    if ((fd = openat(dir, path, O_RDONLY)) != -1) {
+    if ((fd = openat(dir, path, O_RDONLY | O_CLOEXEC)) != -1) {
         if ((file = fdopen(fd, "r"))) {
             if(fgets(s, sz, file)  &&  fgetc(file) == EOF) {
                 sz = strlen(s);
@@ -126,7 +126,7 @@ static int handle_msg(const char *msgid, const char *hostname,
 
         /* create directory (ok if exists) */
         if (!mkdirat(cqdir, msgidnew, DCREAT_MODE)  ||  errno == EEXIST) {
-            if ((msgdir = openat(cqdir, msgidnew, O_RDONLY)) != -1) {
+            if ((msgdir = openat(cqdir, msgidnew, O_RDONLY | O_CLOEXEC)) != -1) {
                 res =
                     /* lock temp base */
                        try_lock(msgdir)
@@ -154,7 +154,7 @@ static int handle_snd(const char *msgid, const char *mac, int cqdir) {
     int res = 0, msgdir;
 
     /* base: .../cables/rqueue/<msgid> */
-    if ((msgdir = openat(cqdir, msgid, O_RDONLY)) != -1) {
+    if ((msgdir = openat(cqdir, msgid, O_RDONLY | O_CLOEXEC)) != -1) {
         if (/* lock base */
                try_lock(msgdir)
             /* check peer.ok */
@@ -189,7 +189,7 @@ static int handle_rcp(const char *msgid, const char *mac, int cqdir) {
     char exmac[MAC_LENGTH+2];
 
     /* base: .../cables/queue/<msgid> */
-    if ((msgdir = openat(cqdir, msgid, O_RDONLY)) != -1) {
+    if ((msgdir = openat(cqdir, msgid, O_RDONLY | O_CLOEXEC)) != -1) {
         if (/* lock base */
                try_lock(msgdir)
             /* check send.ok */
@@ -225,7 +225,7 @@ static int handle_ack(const char *msgid, const char *mac, int cqdir) {
     char msgiddel[MSGID_LENGTH+4+1], exmac[MAC_LENGTH+2];
 
     /* base: .../cables/rqueue/<msgid> */
-    if ((msgdir = openat(cqdir, msgid, O_RDONLY)) != -1) {
+    if ((msgdir = openat(cqdir, msgid, O_RDONLY | O_CLOEXEC)) != -1) {
         strncpy(msgiddel, msgid, MSGID_LENGTH);
         strcpy(msgiddel + MSGID_LENGTH, ".del");
 
@@ -301,7 +301,7 @@ enum SVC_Status handle_request(const char *request, const char *queues, const ch
 
                     status = SVC_ERR;
 
-                    if ((cqdir = open(rqueues, O_RDONLY)) != -1) {
+                    if ((cqdir = open(rqueues, O_RDONLY | O_CLOEXEC)) != -1) {
                         if (handle_msg(msgid, arg1, arg2, cqdir))
                             status = SVC_OK;
 
@@ -317,7 +317,7 @@ enum SVC_Status handle_request(const char *request, const char *queues, const ch
 
                     status = SVC_ERR;
 
-                    if ((cqdir = open(rqueues, O_RDONLY)) != -1) {
+                    if ((cqdir = open(rqueues, O_RDONLY | O_CLOEXEC)) != -1) {
                         if (handle_snd(msgid, arg1, cqdir))
                             status = SVC_OK;
 
@@ -333,7 +333,7 @@ enum SVC_Status handle_request(const char *request, const char *queues, const ch
 
                     status = SVC_ERR;
 
-                    if ((cqdir = open(queues, O_RDONLY)) != -1) {
+                    if ((cqdir = open(queues, O_RDONLY | O_CLOEXEC)) != -1) {
                         if (handle_rcp(msgid, arg1, cqdir))
                             status = SVC_OK;
 
@@ -349,7 +349,7 @@ enum SVC_Status handle_request(const char *request, const char *queues, const ch
 
                     status = SVC_ERR;
 
-                    if ((cqdir = open(rqueues, O_RDONLY)) != -1) {
+                    if ((cqdir = open(rqueues, O_RDONLY | O_CLOEXEC)) != -1) {
                         if (handle_ack(msgid, arg1, cqdir))
                             status = SVC_OK;
 

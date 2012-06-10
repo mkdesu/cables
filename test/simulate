@@ -367,14 +367,18 @@ killpid1= killpid2=
 
 
 sinfo "Testing non-inotify daemon operation"
+maxname=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ccdaemon() {
     local pid1= pid2= chkdir=
+
+    # tests ability to deal with max-length filenames (readdir and inotify)
+    mkdir ${root}/user{1,2}/queues/{,r}queue/${maxname}
 
     ${root}/stage1/libexec/cable/cabled & pid1=$!
     ${root}/stage2/libexec/cable/cabled & pid2=$!
 
     for chkdir in user{1,2}/queues; do
-        while find ${root}/${chkdir} -mindepth 2 -maxdepth 2 | grep -q .; do
+        while find ${root}/${chkdir} -mindepth 2 -maxdepth 2 ! -name ${maxname} | grep -q .; do
             sleep 2
         done
     done
@@ -382,6 +386,7 @@ ccdaemon() {
     kill ${pid1} ${pid2}
     wait ${pid1} ${pid2} || :
 
+    rmdir ${root}/user{1,2}/queues/{,r}queue/${maxname}
     if find ${root} -path '*queue/*' | grep -q .; then
         echo "queue leftovers"
         return 1
@@ -410,6 +415,7 @@ fakemid=${root}/user1/queues/rqueue/012345abcd012345abcd012345abcd012345abcd.new
 cp -r ${faketmp} ${fakemid}
 touch --date="2 days ago" ${faketmp} ${fakemid}
 
+(sleep 10; touch -c ${root}/user{1,2}/queues/{,r}queue/${maxname}) &
 ccdaemon
 
 if grep -rq Failed ${root}/user{1,2}/inbox; then

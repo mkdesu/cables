@@ -1,7 +1,7 @@
 # Single-source file programs to build
 progs   = cable/daemon cable/mhdrop cable/hex2base32 \
           cable/eeppriv.jar
-objextra_daemon = obj/server.o obj/service.o obj/util.o
+objextra_daemon = obj/server.o obj/service.o obj/process.o obj/util.o
 ldextra_daemon  = -lrt -lmicrohttpd
 cpextra_EepPriv = /opt/i2p/lib/i2p.jar
 

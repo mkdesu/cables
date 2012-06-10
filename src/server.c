@@ -20,6 +20,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <netdb.h>
 #include <sys/stat.h>
 
@@ -96,7 +97,7 @@ static int queue_fd(struct MHD_Connection *connection,
     }
     strcat(path, sfx);
 
-    if ((fd = open(path, O_RDONLY)) != -1) {
+    if ((fd = open(path, O_RDONLY | O_CLOEXEC)) != -1) {
         if (!fstat(fd, &st)  &&  ((resp = MHD_create_response_from_fd(st.st_size, fd)))) {
             ret = MHD_queue_response(connection, MHD_HTTP_OK, resp);
             MHD_destroy_response(resp);
@@ -200,7 +201,7 @@ static int read_username(const char *certs) {
     strcpy(path, certs);
     strcat(path, "/" USERNAME_SFX);
 
-    if ((file = fopen(path, "r"))) {
+    if ((file = fopen(path, "re"))) {
         if(fgets(username, sizeof(username), file)  &&  fgetc(file) == EOF) {
             len = strlen(username);
             if (username[len-1] == '\n')
@@ -215,6 +216,20 @@ static int read_username(const char *certs) {
     }
 
     return res;
+}
+
+
+static int ignore_sigpipe() {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+
+    /* restart system calls interrupted by SIGPIPE (if not using SIG_IGN) */
+    sa.sa_handler  = SIG_IGN;
+    sa.sa_flags    = SA_RESTART;
+
+    /* SIGPIPE is automatically added to the mask */
+    return !sigemptyset(&sa.sa_mask)
+        && !sigaction(SIGPIPE, &sa, NULL);
 }
 
 
@@ -233,6 +248,12 @@ int init_server(const char *certs, const char *qpath, const char *rqpath,
     crt_path = certs;
     cq_path  = qpath;
     crq_path = rqpath;
+
+
+    /* ignore SIGPIPE, as recommended by libmicrohttpd */
+    if (!ignore_sigpipe())
+        warning("failed to ignore PIPE signal");
+
 
     if (!read_username(certs)) {
         flog(LOG_ERR, "could not read %s/username", certs);
