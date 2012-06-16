@@ -24,6 +24,10 @@
 #include <netdb.h>
 #include <sys/stat.h>
 
+#ifndef EAI_ADDRFAMILY
+#define EAI_ADDRFAMILY -9
+#endif
+
 #include "server.h"
 #include "daemon.h"
 #include "service.h"
@@ -273,12 +277,13 @@ int init_server(const char *certs, const char *qpath, const char *rqpath,
 
     /* translate host address */
     memset(&addr_hints, 0, sizeof(addr_hints));
-    addr_hints.ai_family   = AF_INET;
+    addr_hints.ai_family   = AF_UNSPEC /* AF_INET causes EAI_NONAME when network is down */;
     addr_hints.ai_socktype = SOCK_STREAM;
     addr_hints.ai_protocol = IPPROTO_TCP;
     addr_hints.ai_flags    = AI_V4MAPPED | AI_ADDRCONFIG | AI_PASSIVE;
 
-    if ((addr_res = getaddrinfo((*host ? host : NULL), port, &addr_hints, &address))) {
+    if (((addr_res = getaddrinfo((*host ? host : NULL), port, &addr_hints, &address)))
+        ||  (address->ai_family != AF_INET  &&  ((addr_res = EAI_ADDRFAMILY)))) {
         flog(LOG_ERR, "%s", gai_strerror(addr_res));
         return 0;
     }
