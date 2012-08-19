@@ -171,7 +171,7 @@ static int handle_snd(const char *msgid, const char *mac, int cqdir) {
                     /* unlock base (touch triggers loop's lock) */
                        !flock(msgdir, LOCK_UN)
                     /* touch /cables/rqueue/<msgid>/ (if recv.req didn't exist) */
-                    /* euid owns msgdir, so O_RDWR is not needed */
+                    /* euid owns msgdir, so O_RDWR is not needed (NOTE: unless overlayfs) */
                     && !futimens(msgdir, NULL);
         }
 
@@ -207,7 +207,7 @@ static int handle_rcp(const char *msgid, const char *mac, int cqdir) {
                     /* unlock base (touch triggers loop's lock) */
                        !flock(msgdir, LOCK_UN)
                     /* touch /cables/queue/<msgid>/ (if ack.req didn't exist) */
-                    /* euid owns msgdir, so O_RDWR is not needed */
+                    /* euid owns msgdir, so O_RDWR is not needed (NOTE: unless overlayfs) */
                     && !futimens(msgdir, NULL);
         }
 

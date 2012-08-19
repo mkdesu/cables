@@ -17,6 +17,7 @@ version="LIBERTE CABLE 3.0"
 root=${TMPDIR}/stage
 sinfo "Root dir: ${root}"
 rm -rf ${root}
+unset TMPDIR
 
 
 sinfo "Building"
