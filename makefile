@@ -1,6 +1,6 @@
 # Single-source file programs to build
 progs   = cable/daemon cable/mhdrop cable/hex2base32 \
-          cable/eeppriv.jar
+          $(if $(NOI2P),,cable/eeppriv.jar)
 objextra_daemon = obj/server.o obj/service.o obj/process.o obj/util.o
 ldextra_daemon  = -lrt -lmicrohttpd
 cpextra_EepPriv = /opt/i2p/lib/i2p.jar
@@ -21,6 +21,9 @@ etcdir=$(DESTDIR)$(ETCPREFIX)
 # Default compilers
 CC      = gcc
 JAVAC   = javac
+
+# Disable I2P eepSite keypair generation functionality? (non-empty to disable)
+NOI2P   =
 
 # Modifications to compiler flags
 CFLAGS := -std=c99 -Wall -pedantic -MMD -D_FILE_OFFSET_BITS=64 -D_POSIX_C_SOURCE=200809L -D_BSD_SOURCE -DNDEBUG $(CFLAGS)
@@ -60,7 +63,6 @@ install: all
 	install        -t $(instdir)/bin                bin/*
 	install        -t $(instdir)/libexec/cable      cable/*
 	install -m 644 -t $(instdir)/share/applications $(wildcard share/*.desktop)
-	-chmod a-x $(instdir)/libexec/cable/eeppriv.jar
 	sed -i     's&/usr/libexec/cable\>&$(PREFIX)/libexec/cable&g' \
 	           $(addprefix $(etcdir)/cable/,profile cabled)       \
 	           $(instdir)/bin/cable-send
@@ -68,6 +70,11 @@ install: all
 	           $(etcdir)/cable/profile                            \
 	           $(addprefix $(instdir)/libexec/cable/,cabled send) \
 	           $(addprefix $(instdir)/bin/,cable-id cable-ping cable-send gen-cable-username gen-tor-hostname gen-i2p-hostname)
+ifeq ($(strip $(NOI2P)),)
+	chmod a-x $(instdir)/libexec/cable/eeppriv.jar
+else
+	rm        $(instdir)/bin/gen-i2p-hostname
+endif
 
 
 # File-specific dependencies
