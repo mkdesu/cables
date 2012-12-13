@@ -9,7 +9,7 @@ inherit eutils
 
 DESCRIPTION="Secure and anonymous serverless email-like communication."
 HOMEPAGE="http://dee.su/cables"
-LICENSE="GPL-3"
+LICENSE="GPL-2"
 
 # I2P version is not critical, and need not be updated
 MY_P_PF=mkdesu-cables
