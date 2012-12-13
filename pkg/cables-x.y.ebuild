@@ -36,11 +36,6 @@ RDEPEND="net-libs/libmicrohttpd
 	i2p? ( >=virtual/jre-1.5 )
 	gnome-extra/zenity"
 
-pkg_setup() {
-	enewgroup cable
-	enewuser  cable -1 -1 -1 cable
-}
-
 src_unpack() {
 	unpack ${P}.tar.gz
 	mv ${MY_P_PF}-* ${P} || die "failed to recognize archive top directory"
@@ -63,6 +58,11 @@ src_install() {
 
 	doinitd  "${D}"/etc/cable/cabled
 	rm       "${D}"/etc/cable/cabled || die
+}
+
+pkg_preinst() {
+	enewgroup cable
+	enewuser  cable -1 -1 -1 cable
 }
 
 pkg_postinst() {

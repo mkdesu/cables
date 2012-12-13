@@ -3,5 +3,6 @@
 description="Cables communication daemon"
 
 command=/usr/libexec/cable/cabled
-start_stop_daemon_args="-bm -u cable"
+command_background="true"
+start_stop_daemon_args="-u cable"
 pidfile=/var/run/cabled.pid
