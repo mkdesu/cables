@@ -34,7 +34,7 @@ Key derivation:
   + [derive.pem]  + [rpeer.der] -> DH key derivation             -> [shared.key]
   + [speer.der]     -> signed    with sender's    [sign.pem]     -> [speer.sig]
   + [message]       -> encrypted with shared      [shared.key]   -> [message.enc]
-  + [message.enc] + [speer.sig] + MAC_send(message)              -> <send>
+  + [message.enc] + [speer.sig] + MAC_send([message])            -> <send>
 
 <recv> (recipient)
   + [message.enc] + [speer.sig] + MAC_send(message)               <- <receive>
